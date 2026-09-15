@@ -10,7 +10,7 @@ let statusBarItem;
 let pollIntervalTimer;
 function activate(context) {
     // Create the status bar item
-    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     statusBarItem.command = 'claudeSwap.switchAccount';
     context.subscriptions.push(statusBarItem);
     // Register Commands
@@ -73,18 +73,25 @@ async function refreshStatusAndBar() {
         let fiveHourStr = 'N/A';
         let sevenDayStr = 'N/A';
         if (activeAccount.usageStatus === 'ok' && activeAccount.usage) {
+            const getProgressBar = (pct) => {
+                const totalBars = 5;
+                const filled = Math.max(0, Math.min(totalBars, Math.round((pct / 100) * totalBars)));
+                return '█'.repeat(filled) + '░'.repeat(totalBars - filled);
+            };
             if (activeAccount.usage.fiveHour) {
-                fiveHourStr = `${Math.round(activeAccount.usage.fiveHour.pct)}%`;
+                const pct = activeAccount.usage.fiveHour.pct;
+                fiveHourStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
             }
             if (activeAccount.usage.sevenDay) {
-                sevenDayStr = `${Math.round(activeAccount.usage.sevenDay.pct)}%`;
+                const pct = activeAccount.usage.sevenDay.pct;
+                sevenDayStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
             }
         }
         else if (activeAccount.usageStatus) {
             fiveHourStr = activeAccount.usageStatus;
             sevenDayStr = activeAccount.usageStatus;
         }
-        statusBarItem.text = `$(account) Claude ${num} : ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}`;
+        statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}`;
         statusBarItem.tooltip = `Active Claude Code Account\nEmail: ${activeAccount.email}\nStatus: ${activeAccount.usageStatus}\nClick to switch accounts.`;
     }
     else {
@@ -104,9 +111,16 @@ async function switchAccount() {
         const isActive = acc.number === activeNum;
         let desc = acc.email;
         if (acc.usageStatus === 'ok' && acc.usage) {
-            const fPct = acc.usage.fiveHour ? Math.round(acc.usage.fiveHour.pct) : '?';
-            const sPct = acc.usage.sevenDay ? Math.round(acc.usage.sevenDay.pct) : '?';
-            desc += ` (5h: ${fPct}%, 7d: ${sPct}%)`;
+            const getProgressBar = (pct) => {
+                const totalBars = 5;
+                const filled = Math.max(0, Math.min(totalBars, Math.round((pct / 100) * totalBars)));
+                return '█'.repeat(filled) + '░'.repeat(totalBars - filled);
+            };
+            const fPctNum = acc.usage.fiveHour ? Math.round(acc.usage.fiveHour.pct) : null;
+            const sPctNum = acc.usage.sevenDay ? Math.round(acc.usage.sevenDay.pct) : null;
+            const fPctStr = fPctNum !== null ? `${getProgressBar(fPctNum)} ${fPctNum}%` : '?';
+            const sPctStr = sPctNum !== null ? `${getProgressBar(sPctNum)} ${sPctNum}%` : '?';
+            desc += ` (5h: ${fPctStr}, 7d: ${sPctStr})`;
         }
         else {
             desc += ` (${acc.usageStatus})`;

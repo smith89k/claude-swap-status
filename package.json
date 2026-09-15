@@ -3,10 +3,10 @@
   "displayName": "Claude Code Multi-Account Manager",
   "description": "Status bar usage and account switcher for Claude Code via claude-swap.",
   "version": "0.1.0",
-  "publisher": "local",
+  "publisher": "smith89k",
   "repository": {
     "type": "git",
-    "url": "https://github.com/example/example.git"
+    "url": "https://github.com/smith89k/claude-swap-ide.git"
   },
   "engines": {
     "vscode": "^1.80.0"
