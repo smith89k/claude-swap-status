@@ -1,8 +1,6 @@
-# Claude Code Multi-Account Manager (Antigravity IDE Plugin)
+# Claude Usage Status
 
-A VS Code / Antigravity IDE extension that provides a status bar usage tracker and an interactive account switcher for Claude Code.
-
-This extension wraps the open-source [claude-swap](https://github.com/realiti4/claude-swap) CLI tool to provide a rich native graphical interface.
+A VS Code extension that provides a status bar usage tracker for Claude Code. It requires and depends entirely on the [claude-swap](https://github.com/realiti4/claude-swap) repository to work.
 
 ## Features
 

@@ -83,9 +83,11 @@ async function fetchCswapData() {
 }
 async function refreshStatusAndBar() {
   const data = await fetchCswapData();
+  statusBarItem.backgroundColor = void 0;
   if (!data || !data.accounts) {
     statusBarItem.text = `$(account) Claude: cswap error`;
     statusBarItem.tooltip = `Failed to read from cswap. Make sure claude-swap is installed and in your PATH.`;
+    statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
     statusBarItem.show();
     return;
   }
@@ -105,14 +107,27 @@ async function refreshStatusAndBar() {
       if (activeAccount.usage.fiveHour) {
         const pct = activeAccount.usage.fiveHour.pct;
         fiveHourStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
+        if (pct >= 90) {
+          statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+        } else if (pct >= 85) {
+          statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+        }
       }
       if (activeAccount.usage.sevenDay) {
         const pct = activeAccount.usage.sevenDay.pct;
         sevenDayStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
+        if (pct >= 90) {
+          statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+        } else if (pct >= 85 && statusBarItem.backgroundColor === void 0) {
+          statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+        }
       }
     } else if (activeAccount.usageStatus) {
       fiveHourStr = activeAccount.usageStatus;
       sevenDayStr = activeAccount.usageStatus;
+      if (activeAccount.usageStatus !== "ok") {
+        statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+      }
     }
     statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}`;
     statusBarItem.tooltip = `Active Claude Code Account
