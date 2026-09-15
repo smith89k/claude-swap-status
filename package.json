@@ -3,6 +3,7 @@
   "displayName": "Claude Swap Status",
   "description": "Unofficial status bar usage indicator for Claude Code, built on claude-swap. Requires https://github.com/realiti4/claude-swap to work. Not affiliated with the claude-swap author or Anthropic.",
   "version": "0.1.1",
+  "license": "MIT",
   "icon": "icon.png",
   "publisher": "smith89k",
   "repository": {
