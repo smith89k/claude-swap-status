@@ -1,13 +1,13 @@
 {
-  "name": "claude-usage-status",
-  "displayName": "Claude Usage Status",
-  "description": "VS Code status bar usage indicator for Claude Code. Requires https://github.com/realiti4/claude-swap to work.",
-  "version": "0.1.0",
+  "name": "claude-swap-status",
+  "displayName": "Claude Swap Status",
+  "description": "Unofficial status bar usage indicator for Claude Code, built on claude-swap. Requires https://github.com/realiti4/claude-swap to work. Not affiliated with the claude-swap author or Anthropic.",
+  "version": "0.1.1",
   "icon": "icon.png",
   "publisher": "smith89k",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smith89k/claude-swap-ide.git"
+    "url": "https://github.com/smith89k/claude-swap-status.git"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -60,10 +60,8 @@
   "devDependencies": {
     "@types/node": "18.x",
     "@types/vscode": "^1.80.0",
+    "canvas": "^3.2.3",
     "esbuild": "^0.19.11",
     "typescript": "^5.3.3"
-  },
-  "dependencies": {
-    "canvas": "^3.2.3"
   }
 }
