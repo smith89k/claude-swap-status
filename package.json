@@ -1,0 +1,65 @@
+{
+  "name": "claude-swap-ide",
+  "displayName": "Claude Code Multi-Account Manager",
+  "description": "Status bar usage and account switcher for Claude Code via claude-swap.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/example/example.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeSwap.switchAccount",
+        "title": "Claude Swap: Switch Account"
+      },
+      {
+        "command": "claudeSwap.addAccount",
+        "title": "Claude Swap: Add Account"
+      },
+      {
+        "command": "claudeSwap.refreshStatus",
+        "title": "Claude Swap: Refresh Usage"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Swap",
+      "properties": {
+        "claudeSwap.pollIntervalMinutes": {
+          "type": "number",
+          "default": 5,
+          "description": "How often to poll cswap for usage status (in minutes)."
+        },
+        "claudeSwap.cswapExecutablePath": {
+          "type": "string",
+          "default": "cswap",
+          "description": "Path to the cswap CLI executable if it is not in your PATH."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "build": "npm run package"
+  },
+  "devDependencies": {
+    "@types/node": "18.x",
+    "@types/vscode": "^1.80.0",
+    "esbuild": "^0.19.11",
+    "typescript": "^5.3.3"
+  }
+}
