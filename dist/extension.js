@@ -107,18 +107,18 @@ async function refreshStatusAndBar() {
       if (activeAccount.usage.fiveHour) {
         const pct = activeAccount.usage.fiveHour.pct;
         fiveHourStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
-        if (pct >= 90) {
+        if (pct >= 85) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
-        } else if (pct >= 85) {
+        } else if (pct >= 70) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
         }
       }
       if (activeAccount.usage.sevenDay) {
         const pct = activeAccount.usage.sevenDay.pct;
         sevenDayStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
-        if (pct >= 90) {
+        if (pct >= 85) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
-        } else if (pct >= 85 && statusBarItem.backgroundColor === void 0) {
+        } else if (pct >= 70 && statusBarItem.backgroundColor === void 0) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
         }
       }
