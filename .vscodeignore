@@ -10,3 +10,4 @@ src/**
 convert.js
 icon.svg
 tsconfig.json
+.github/**
