@@ -65,9 +65,9 @@ The status bar changes color so you notice before you run out:
 
 | Usage          | Color  |
 | -------------- | ------ |
-| Below 85%      | Normal |
-| 85% or more    | Yellow |
-| 90% or more    | Red    |
+| Below 70%      | Normal |
+| 70% or more    | Yellow |
+| 85% or more    | Red    |
 
 ### Switch accounts in one click
 
