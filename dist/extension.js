@@ -68,13 +68,16 @@ function formatResetIn(resetsAt) {
     return null;
   }
   const minutes = Math.max(0, Math.floor(ms / 6e4));
-  if (minutes >= 24 * 60) {
-    return `${Math.floor(minutes / (24 * 60))}d`;
+  const days = Math.floor(minutes / (24 * 60));
+  const hours = Math.floor(minutes % (24 * 60) / 60);
+  const mins = minutes % 60;
+  if (days > 0) {
+    return `${days}d${hours > 0 ? `${hours}h` : ""}`;
   }
-  if (minutes >= 60) {
-    return `${Math.floor(minutes / 60)}h`;
+  if (hours > 0) {
+    return `${hours}h${mins > 0 ? `${mins}m` : ""}`;
   }
-  return `${minutes}m`;
+  return `${mins}m`;
 }
 function formatWindow(window2) {
   const resetIn = formatResetIn(window2.resetsAt);

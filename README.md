@@ -52,12 +52,12 @@ The status bar item appears once the editor finishes starting up.
 The status bar shows the active account and how much of your limits you have used:
 
 ```text
-👤 Claude 1: work | 5h: █░░░░ 25% R:3h | 7d: █░░░░ 16% R:1d
+👤 Claude 1: work | 5h: █░░░░ 25% R:3h12m | 7d: █░░░░ 16% R:1d4h
 ```
 
 - **5h** is your 5-hour usage limit.
 - **7d** is your 7-day usage limit.
-- **R:** is how long until that limit resets (`45m`, `3h`, `1d`).
+- **R:** is how long until that limit resets (`45m`, `3h12m`, `1d4h`).
 - Hover over it to see the account email, status, and the exact reset times.
 
 ### Warning colors
