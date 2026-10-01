@@ -52,12 +52,13 @@ The status bar item appears once the editor finishes starting up.
 The status bar shows the active account and how much of your limits you have used:
 
 ```text
-👤 Claude 1: work | 5h: █░░░░ 25% | 7d: █░░░░ 16%
+👤 Claude 1: work | 5h: █░░░░ 25% R:3h | 7d: █░░░░ 16% R:1d
 ```
 
 - **5h** is your 5-hour usage limit.
 - **7d** is your 7-day usage limit.
-- Hover over it to see the account email and status.
+- **R:** is how long until that limit resets (`45m`, `3h`, `1d`).
+- Hover over it to see the account email, status, and the exact reset times.
 
 ### Warning colors
 
@@ -91,7 +92,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 
 | Setting                           | Default | Description                                                          |
 | --------------------------------- | ------- | -------------------------------------------------------------------- |
-| `claudeSwap.pollIntervalMinutes`  | `5`     | How often to check usage, in minutes.                                |
+| `claudeSwap.pollIntervalMinutes`  | `1`     | How often to check usage, in minutes (minimum `0.5`).                |
 | `claudeSwap.cswapExecutablePath`  | `cswap` | Full path to the `cswap` tool, if it is not in your system's PATH.   |
 
 ## Troubleshooting

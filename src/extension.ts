@@ -29,6 +29,45 @@ export function activate(context: vscode.ExtensionContext) {
     setupPolling();
 }
 
+function getProgressBar(pct: number): string {
+    const totalBars = 5;
+    const filled = Math.max(0, Math.min(totalBars, Math.round((pct / 100) * totalBars)));
+    return '█'.repeat(filled) + '░'.repeat(totalBars - filled);
+}
+
+// Compact time-until-reset, e.g. "3h", "1d", "45m". Computed from resetsAt so it stays current between polls.
+function formatResetIn(resetsAt?: string): string | null {
+    if (!resetsAt) {
+        return null;
+    }
+    const ms = new Date(resetsAt).getTime() - Date.now();
+    if (isNaN(ms)) {
+        return null;
+    }
+    const minutes = Math.max(0, Math.floor(ms / 60000));
+    if (minutes >= 24 * 60) {
+        return `${Math.floor(minutes / (24 * 60))}d`;
+    }
+    if (minutes >= 60) {
+        return `${Math.floor(minutes / 60)}h`;
+    }
+    return `${minutes}m`;
+}
+
+function formatWindow(window: any): string {
+    const resetIn = formatResetIn(window.resetsAt);
+    return `${getProgressBar(window.pct)} ${Math.round(window.pct)}%${resetIn ? ` R:${resetIn}` : ''}`;
+}
+
+function formatResetDetail(label: string, window: any): string {
+    if (!window || !window.resetsAt) {
+        return `${label}: no reset scheduled`;
+    }
+    const when = window.clock ? ` at ${window.clock}` : '';
+    const resetIn = formatResetIn(window.resetsAt);
+    return `${label} resets${when}${resetIn ? ` (in ${resetIn})` : ''}`;
+}
+
 function getCswapCommand(): string {
     const config = vscode.workspace.getConfiguration('claudeSwap');
     return config.get<string>('cswapExecutablePath') || 'cswap';
@@ -41,7 +80,7 @@ function setupPolling() {
     }
 
     const config = vscode.workspace.getConfiguration('claudeSwap');
-    const minutes = config.get<number>('pollIntervalMinutes') || 5;
+    const minutes = Math.max(0.5, config.get<number>('pollIntervalMinutes') || 1);
 
     // Do an immediate refresh
     refreshStatusAndBar();
@@ -82,23 +121,21 @@ async function refreshStatusAndBar() {
     const activeAccount = data.accounts.find((a: any) => a.number === activeNum);
 
     if (activeAccount) {
-        // Format: $(account) Claude <num> : <alias> | 5h: 25% | 7d: 16%
+        // Format: $(account) Claude <num>: <alias> | 5h: █░░░░ 25% R:3h | 7d: █░░░░ 16% R:1d
         const num = activeAccount.number;
         const nameLabel = activeAccount.alias ? activeAccount.alias : activeAccount.email;
         
         let fiveHourStr = 'N/A';
         let sevenDayStr = 'N/A';
         
+        let resetLines = '';
+
         if (activeAccount.usageStatus === 'ok' && activeAccount.usage) {
-            const getProgressBar = (pct: number) => {
-                const totalBars = 5;
-                const filled = Math.max(0, Math.min(totalBars, Math.round((pct / 100) * totalBars)));
-                return '█'.repeat(filled) + '░'.repeat(totalBars - filled);
-            };
+            resetLines = `\n${formatResetDetail('5h', activeAccount.usage.fiveHour)}\n${formatResetDetail('7d', activeAccount.usage.sevenDay)}`;
 
             if (activeAccount.usage.fiveHour) {
                 const pct = activeAccount.usage.fiveHour.pct;
-                fiveHourStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
+                fiveHourStr = formatWindow(activeAccount.usage.fiveHour);
                 
                 if (pct >= 85) {
                     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
@@ -108,7 +145,7 @@ async function refreshStatusAndBar() {
             }
             if (activeAccount.usage.sevenDay) {
                 const pct = activeAccount.usage.sevenDay.pct;
-                sevenDayStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
+                sevenDayStr = formatWindow(activeAccount.usage.sevenDay);
                 
                 if (pct >= 85) {
                     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
@@ -126,7 +163,7 @@ async function refreshStatusAndBar() {
         }
 
         statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}`;
-        statusBarItem.tooltip = `Active Claude Code Account\nEmail: ${activeAccount.email}\nStatus: ${activeAccount.usageStatus}\nClick to switch accounts.`;
+        statusBarItem.tooltip = `Active Claude Code Account\nEmail: ${activeAccount.email}\nStatus: ${activeAccount.usageStatus}${resetLines}\nClick to switch accounts.`;
     } else {
         statusBarItem.text = `$(account) Claude: No Active Account`;
         statusBarItem.tooltip = `No active account selected in cswap. Click to switch or add an account.`;
@@ -148,17 +185,8 @@ async function switchAccount() {
         const isActive = acc.number === activeNum;
         let desc = acc.email;
         if (acc.usageStatus === 'ok' && acc.usage) {
-            const getProgressBar = (pct: number) => {
-                const totalBars = 5;
-                const filled = Math.max(0, Math.min(totalBars, Math.round((pct / 100) * totalBars)));
-                return '█'.repeat(filled) + '░'.repeat(totalBars - filled);
-            };
-
-            const fPctNum = acc.usage.fiveHour ? Math.round(acc.usage.fiveHour.pct) : null;
-            const sPctNum = acc.usage.sevenDay ? Math.round(acc.usage.sevenDay.pct) : null;
-            
-            const fPctStr = fPctNum !== null ? `${getProgressBar(fPctNum)} ${fPctNum}%` : '?';
-            const sPctStr = sPctNum !== null ? `${getProgressBar(sPctNum)} ${sPctNum}%` : '?';
+            const fPctStr = acc.usage.fiveHour ? formatWindow(acc.usage.fiveHour) : '?';
+            const sPctStr = acc.usage.sevenDay ? formatWindow(acc.usage.sevenDay) : '?';
             
             desc += ` (5h: ${fPctStr}, 7d: ${sPctStr})`;
         } else {

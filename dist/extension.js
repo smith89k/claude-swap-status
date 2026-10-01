@@ -54,6 +54,40 @@ function activate(context) {
   }));
   setupPolling();
 }
+function getProgressBar(pct) {
+  const totalBars = 5;
+  const filled = Math.max(0, Math.min(totalBars, Math.round(pct / 100 * totalBars)));
+  return "\u2588".repeat(filled) + "\u2591".repeat(totalBars - filled);
+}
+function formatResetIn(resetsAt) {
+  if (!resetsAt) {
+    return null;
+  }
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  if (isNaN(ms)) {
+    return null;
+  }
+  const minutes = Math.max(0, Math.floor(ms / 6e4));
+  if (minutes >= 24 * 60) {
+    return `${Math.floor(minutes / (24 * 60))}d`;
+  }
+  if (minutes >= 60) {
+    return `${Math.floor(minutes / 60)}h`;
+  }
+  return `${minutes}m`;
+}
+function formatWindow(window2) {
+  const resetIn = formatResetIn(window2.resetsAt);
+  return `${getProgressBar(window2.pct)} ${Math.round(window2.pct)}%${resetIn ? ` R:${resetIn}` : ""}`;
+}
+function formatResetDetail(label, window2) {
+  if (!window2 || !window2.resetsAt) {
+    return `${label}: no reset scheduled`;
+  }
+  const when = window2.clock ? ` at ${window2.clock}` : "";
+  const resetIn = formatResetIn(window2.resetsAt);
+  return `${label} resets${when}${resetIn ? ` (in ${resetIn})` : ""}`;
+}
 function getCswapCommand() {
   const config = vscode.workspace.getConfiguration("claudeSwap");
   return config.get("cswapExecutablePath") || "cswap";
@@ -64,7 +98,7 @@ function setupPolling() {
     pollIntervalTimer = void 0;
   }
   const config = vscode.workspace.getConfiguration("claudeSwap");
-  const minutes = config.get("pollIntervalMinutes") || 5;
+  const minutes = Math.max(0.5, config.get("pollIntervalMinutes") || 1);
   refreshStatusAndBar();
   pollIntervalTimer = setInterval(() => {
     refreshStatusAndBar();
@@ -98,15 +132,14 @@ async function refreshStatusAndBar() {
     const nameLabel = activeAccount.alias ? activeAccount.alias : activeAccount.email;
     let fiveHourStr = "N/A";
     let sevenDayStr = "N/A";
+    let resetLines = "";
     if (activeAccount.usageStatus === "ok" && activeAccount.usage) {
-      const getProgressBar = (pct) => {
-        const totalBars = 5;
-        const filled = Math.max(0, Math.min(totalBars, Math.round(pct / 100 * totalBars)));
-        return "\u2588".repeat(filled) + "\u2591".repeat(totalBars - filled);
-      };
+      resetLines = `
+${formatResetDetail("5h", activeAccount.usage.fiveHour)}
+${formatResetDetail("7d", activeAccount.usage.sevenDay)}`;
       if (activeAccount.usage.fiveHour) {
         const pct = activeAccount.usage.fiveHour.pct;
-        fiveHourStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
+        fiveHourStr = formatWindow(activeAccount.usage.fiveHour);
         if (pct >= 85) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
         } else if (pct >= 70) {
@@ -115,7 +148,7 @@ async function refreshStatusAndBar() {
       }
       if (activeAccount.usage.sevenDay) {
         const pct = activeAccount.usage.sevenDay.pct;
-        sevenDayStr = `${getProgressBar(pct)} ${Math.round(pct)}%`;
+        sevenDayStr = formatWindow(activeAccount.usage.sevenDay);
         if (pct >= 85) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
         } else if (pct >= 70 && statusBarItem.backgroundColor === void 0) {
@@ -132,7 +165,7 @@ async function refreshStatusAndBar() {
     statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}`;
     statusBarItem.tooltip = `Active Claude Code Account
 Email: ${activeAccount.email}
-Status: ${activeAccount.usageStatus}
+Status: ${activeAccount.usageStatus}${resetLines}
 Click to switch accounts.`;
   } else {
     statusBarItem.text = `$(account) Claude: No Active Account`;
@@ -151,15 +184,8 @@ async function switchAccount() {
     const isActive = acc.number === activeNum;
     let desc = acc.email;
     if (acc.usageStatus === "ok" && acc.usage) {
-      const getProgressBar = (pct) => {
-        const totalBars = 5;
-        const filled = Math.max(0, Math.min(totalBars, Math.round(pct / 100 * totalBars)));
-        return "\u2588".repeat(filled) + "\u2591".repeat(totalBars - filled);
-      };
-      const fPctNum = acc.usage.fiveHour ? Math.round(acc.usage.fiveHour.pct) : null;
-      const sPctNum = acc.usage.sevenDay ? Math.round(acc.usage.sevenDay.pct) : null;
-      const fPctStr = fPctNum !== null ? `${getProgressBar(fPctNum)} ${fPctNum}%` : "?";
-      const sPctStr = sPctNum !== null ? `${getProgressBar(sPctNum)} ${sPctNum}%` : "?";
+      const fPctStr = acc.usage.fiveHour ? formatWindow(acc.usage.fiveHour) : "?";
+      const sPctStr = acc.usage.sevenDay ? formatWindow(acc.usage.sevenDay) : "?";
       desc += ` (5h: ${fPctStr}, 7d: ${sPctStr})`;
     } else {
       desc += ` (${acc.usageStatus})`;

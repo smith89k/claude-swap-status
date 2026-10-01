@@ -40,8 +40,9 @@
       "properties": {
         "claudeSwap.pollIntervalMinutes": {
           "type": "number",
-          "default": 5,
-          "description": "How often to poll cswap for usage status (in minutes)."
+          "default": 1,
+          "minimum": 0.5,
+          "description": "How often to poll cswap for usage status (in minutes). Minimum 0.5."
         },
         "claudeSwap.cswapExecutablePath": {
           "type": "string",
