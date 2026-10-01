@@ -8,10 +8,11 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest so a runner image migration can't change the build unannounced.
+    runs-on: ubuntu-24.04
 
     permissions:
-      contents: read
+      contents: write # needed to create the GitHub Release
 
     # Exposed at job level so steps can be skipped when a token isn't configured.
     env:
@@ -31,6 +32,10 @@ jobs:
       - name: Install Dependencies
         # --ignore-scripts: skips building "canvas", which only convert.js (icon tool) needs
         run: npm ci --ignore-scripts
+
+      # esbuild bundles without type checking, so check types explicitly.
+      - name: Type check
+        run: npx tsc -p ./ --noEmit
 
       - name: Check tag matches package.json version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -65,3 +70,13 @@ jobs:
         with:
           name: extension-vsix
           path: extension.vsix
+
+      # Attach the .vsix to a GitHub Release so it can be downloaded from the Releases page.
+      - name: Create GitHub Release
+        if: ${{ !cancelled() && steps.package.outcome == 'success' && startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VSIX="claude-swap-status-${GITHUB_REF_NAME#v}.vsix"
+          cp extension.vsix "$VSIX"
+          gh release create "$GITHUB_REF_NAME" "$VSIX" --title "$GITHUB_REF_NAME" --generate-notes
