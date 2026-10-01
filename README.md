@@ -36,6 +36,13 @@ For more help, see the [claude-swap page](https://github.com/realiti4/claude-swa
 
 ## Step 2: Install this extension
 
+**From the extension store (recommended)**
+
+1. Open the Extensions panel.
+2. Search for **Claude Swap Status** and click **Install**.
+
+It is published on [Open VSX](https://open-vsx.org/extension/smith89k/claude-swap-status) (used by Antigravity IDE and other VS Code-based editors) and the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=smith89k.claude-swap-status). Updates install automatically.
+
 **From a `.vsix` file**
 
 1. Download the latest `.vsix` file from the [Releases](https://github.com/smith89k/claude-swap-status/releases) page.
