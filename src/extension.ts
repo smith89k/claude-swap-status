@@ -72,6 +72,55 @@ function formatResetDetail(label: string, window: any): string {
     return `${label} resets${when}${resetIn ? ` (in ${resetIn})` : ''}`;
 }
 
+// Readable text for cswap's usageStatus codes.
+const STATUS_LABELS: Record<string, string> = {
+    ok: 'ok',
+    token_expired: 'token expired',
+    relogin_required: 're-login needed',
+    no_credentials: 'no credentials',
+    api_key: 'API key (no quota)',
+    keychain_unavailable: 'keychain unavailable',
+    foreign_credential: 'foreign credential',
+    unavailable: 'unavailable',
+};
+
+function statusLabel(status?: string): string {
+    return (status && STATUS_LABELS[status]) || status || 'unknown';
+}
+
+// token_expired fixes itself (Claude Code refreshes the token, cswap retries),
+// so only warn for states the user has to act on.
+function needsAttention(status?: string): boolean {
+    return !!status && status !== 'ok' && status !== 'token_expired';
+}
+
+// Fresh usage when cswap has it, otherwise the last good measurement
+// (cswap sends lastGoodUsage when the current fetch failed, e.g. token_expired).
+function getUsage(acc: any): { usage: any; stale: boolean; ageSeconds?: number } | null {
+    if (acc.usageStatus === 'ok' && acc.usage) {
+        return { usage: acc.usage, stale: false, ageSeconds: acc.usageAgeSeconds };
+    }
+    if (acc.lastGoodUsage) {
+        return { usage: acc.lastGoodUsage, stale: true, ageSeconds: acc.lastGoodAgeSeconds };
+    }
+    return null;
+}
+
+function formatAge(seconds?: number): string {
+    if (seconds === undefined) {
+        return 'a while';
+    }
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 1) {
+        return 'under a minute';
+    }
+    if (minutes < 60) {
+        return `${minutes}m`;
+    }
+    const hours = Math.floor(minutes / 60);
+    return hours < 24 ? `${hours}h${minutes % 60 > 0 ? `${minutes % 60}m` : ''}` : `${Math.floor(hours / 24)}d`;
+}
+
 function getCswapCommand(): string {
     const config = vscode.workspace.getConfiguration('claudeSwap');
     return config.get<string>('cswapExecutablePath') || 'cswap';
@@ -133,41 +182,50 @@ async function refreshStatusAndBar() {
         let sevenDayStr = 'N/A';
         
         let resetLines = '';
+        let staleMark = '';
+        const status = activeAccount.usageStatus;
+        const found = getUsage(activeAccount);
 
-        if (activeAccount.usageStatus === 'ok' && activeAccount.usage) {
-            resetLines = `\n${formatResetDetail('5h', activeAccount.usage.fiveHour)}\n${formatResetDetail('7d', activeAccount.usage.sevenDay)}`;
+        if (found) {
+            const usage = found.usage;
+            resetLines = `\n${formatResetDetail('5h', usage.fiveHour)}\n${formatResetDetail('7d', usage.sevenDay)}`;
+            if (found.stale) {
+                // Show the last known numbers instead of a bare status word.
+                staleMark = ' $(history)';
+                resetLines = `\nShowing last known usage from ${formatAge(found.ageSeconds)} ago (${statusLabel(status)}).${resetLines}`;
+            }
 
-            if (activeAccount.usage.fiveHour) {
-                const pct = activeAccount.usage.fiveHour.pct;
-                fiveHourStr = formatWindow(activeAccount.usage.fiveHour);
-                
+            if (usage.fiveHour) {
+                const pct = usage.fiveHour.pct;
+                fiveHourStr = formatWindow(usage.fiveHour);
+
                 if (pct >= 85) {
                     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
                 } else if (pct >= 70) {
                     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
                 }
             }
-            if (activeAccount.usage.sevenDay) {
-                const pct = activeAccount.usage.sevenDay.pct;
-                sevenDayStr = formatWindow(activeAccount.usage.sevenDay);
-                
+            if (usage.sevenDay) {
+                const pct = usage.sevenDay.pct;
+                sevenDayStr = formatWindow(usage.sevenDay);
+
                 if (pct >= 85) {
                     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
                 } else if (pct >= 70 && statusBarItem.backgroundColor === undefined) {
                     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
                 }
             }
-        } else if (activeAccount.usageStatus) {
-            fiveHourStr = activeAccount.usageStatus;
-            sevenDayStr = activeAccount.usageStatus;
-            
-            if (activeAccount.usageStatus !== 'ok') {
-                statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-            }
+        } else if (status) {
+            fiveHourStr = statusLabel(status);
+            sevenDayStr = statusLabel(status);
         }
 
-        statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}`;
-        statusBarItem.tooltip = `Active Claude Code Account\nEmail: ${activeAccount.email}\nStatus: ${activeAccount.usageStatus}${resetLines}\nClick to switch accounts.`;
+        if (needsAttention(status) && statusBarItem.backgroundColor === undefined) {
+            statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        }
+
+        statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}${staleMark}`;
+        statusBarItem.tooltip = `Active Claude Code Account\nEmail: ${activeAccount.email}\nStatus: ${statusLabel(status)}${resetLines}\nClick to switch accounts.`;
     } else {
         statusBarItem.text = `$(account) Claude: No Active Account`;
         statusBarItem.tooltip = `No active account selected in cswap. Click to switch or add an account.`;
@@ -188,13 +246,17 @@ async function switchAccount() {
     const quickPickItems: (vscode.QuickPickItem & { accountNum: number })[] = data.accounts.map((acc: any) => {
         const isActive = acc.number === activeNum;
         let desc = acc.email;
-        if (acc.usageStatus === 'ok' && acc.usage) {
-            const fPctStr = acc.usage.fiveHour ? formatWindow(acc.usage.fiveHour) : '?';
-            const sPctStr = acc.usage.sevenDay ? formatWindow(acc.usage.sevenDay) : '?';
-            
+        const found = getUsage(acc);
+        if (found) {
+            const fPctStr = found.usage.fiveHour ? formatWindow(found.usage.fiveHour) : '?';
+            const sPctStr = found.usage.sevenDay ? formatWindow(found.usage.sevenDay) : '?';
+
             desc += ` (5h: ${fPctStr}, 7d: ${sPctStr})`;
+            if (found.stale) {
+                desc += ` [last known, ${statusLabel(acc.usageStatus)}]`;
+            }
         } else {
-            desc += ` (${acc.usageStatus})`;
+            desc += ` (${statusLabel(acc.usageStatus)})`;
         }
 
         return {

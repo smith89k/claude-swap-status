@@ -91,6 +91,45 @@ function formatResetDetail(label, window2) {
   const resetIn = formatResetIn(window2.resetsAt);
   return `${label} resets${when}${resetIn ? ` (in ${resetIn})` : ""}`;
 }
+var STATUS_LABELS = {
+  ok: "ok",
+  token_expired: "token expired",
+  relogin_required: "re-login needed",
+  no_credentials: "no credentials",
+  api_key: "API key (no quota)",
+  keychain_unavailable: "keychain unavailable",
+  foreign_credential: "foreign credential",
+  unavailable: "unavailable"
+};
+function statusLabel(status) {
+  return status && STATUS_LABELS[status] || status || "unknown";
+}
+function needsAttention(status) {
+  return !!status && status !== "ok" && status !== "token_expired";
+}
+function getUsage(acc) {
+  if (acc.usageStatus === "ok" && acc.usage) {
+    return { usage: acc.usage, stale: false, ageSeconds: acc.usageAgeSeconds };
+  }
+  if (acc.lastGoodUsage) {
+    return { usage: acc.lastGoodUsage, stale: true, ageSeconds: acc.lastGoodAgeSeconds };
+  }
+  return null;
+}
+function formatAge(seconds) {
+  if (seconds === void 0) {
+    return "a while";
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 1) {
+    return "under a minute";
+  }
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h${minutes % 60 > 0 ? `${minutes % 60}m` : ""}` : `${Math.floor(hours / 24)}d`;
+}
 function getCswapCommand() {
   const config = vscode.workspace.getConfiguration("claudeSwap");
   return config.get("cswapExecutablePath") || "cswap";
@@ -136,39 +175,48 @@ async function refreshStatusAndBar() {
     let fiveHourStr = "N/A";
     let sevenDayStr = "N/A";
     let resetLines = "";
-    if (activeAccount.usageStatus === "ok" && activeAccount.usage) {
+    let staleMark = "";
+    const status = activeAccount.usageStatus;
+    const found = getUsage(activeAccount);
+    if (found) {
+      const usage = found.usage;
       resetLines = `
-${formatResetDetail("5h", activeAccount.usage.fiveHour)}
-${formatResetDetail("7d", activeAccount.usage.sevenDay)}`;
-      if (activeAccount.usage.fiveHour) {
-        const pct = activeAccount.usage.fiveHour.pct;
-        fiveHourStr = formatWindow(activeAccount.usage.fiveHour);
+${formatResetDetail("5h", usage.fiveHour)}
+${formatResetDetail("7d", usage.sevenDay)}`;
+      if (found.stale) {
+        staleMark = " $(history)";
+        resetLines = `
+Showing last known usage from ${formatAge(found.ageSeconds)} ago (${statusLabel(status)}).${resetLines}`;
+      }
+      if (usage.fiveHour) {
+        const pct = usage.fiveHour.pct;
+        fiveHourStr = formatWindow(usage.fiveHour);
         if (pct >= 85) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
         } else if (pct >= 70) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
         }
       }
-      if (activeAccount.usage.sevenDay) {
-        const pct = activeAccount.usage.sevenDay.pct;
-        sevenDayStr = formatWindow(activeAccount.usage.sevenDay);
+      if (usage.sevenDay) {
+        const pct = usage.sevenDay.pct;
+        sevenDayStr = formatWindow(usage.sevenDay);
         if (pct >= 85) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
         } else if (pct >= 70 && statusBarItem.backgroundColor === void 0) {
           statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
         }
       }
-    } else if (activeAccount.usageStatus) {
-      fiveHourStr = activeAccount.usageStatus;
-      sevenDayStr = activeAccount.usageStatus;
-      if (activeAccount.usageStatus !== "ok") {
-        statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
-      }
+    } else if (status) {
+      fiveHourStr = statusLabel(status);
+      sevenDayStr = statusLabel(status);
     }
-    statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}`;
+    if (needsAttention(status) && statusBarItem.backgroundColor === void 0) {
+      statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+    }
+    statusBarItem.text = `$(account) Claude ${num}: ${nameLabel} | 5h: ${fiveHourStr} | 7d: ${sevenDayStr}${staleMark}`;
     statusBarItem.tooltip = `Active Claude Code Account
 Email: ${activeAccount.email}
-Status: ${activeAccount.usageStatus}${resetLines}
+Status: ${statusLabel(status)}${resetLines}
 Click to switch accounts.`;
   } else {
     statusBarItem.text = `$(account) Claude: No Active Account`;
@@ -186,12 +234,16 @@ async function switchAccount() {
   const quickPickItems = data.accounts.map((acc) => {
     const isActive = acc.number === activeNum;
     let desc = acc.email;
-    if (acc.usageStatus === "ok" && acc.usage) {
-      const fPctStr = acc.usage.fiveHour ? formatWindow(acc.usage.fiveHour) : "?";
-      const sPctStr = acc.usage.sevenDay ? formatWindow(acc.usage.sevenDay) : "?";
+    const found = getUsage(acc);
+    if (found) {
+      const fPctStr = found.usage.fiveHour ? formatWindow(found.usage.fiveHour) : "?";
+      const sPctStr = found.usage.sevenDay ? formatWindow(found.usage.sevenDay) : "?";
       desc += ` (5h: ${fPctStr}, 7d: ${sPctStr})`;
+      if (found.stale) {
+        desc += ` [last known, ${statusLabel(acc.usageStatus)}]`;
+      }
     } else {
-      desc += ` (${acc.usageStatus})`;
+      desc += ` (${statusLabel(acc.usageStatus)})`;
     }
     return {
       label: `${isActive ? "$(check) " : ""}Account ${acc.number}${acc.alias ? ` (${acc.alias})` : ""}`,

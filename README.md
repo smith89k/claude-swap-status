@@ -66,6 +66,7 @@ The status bar shows the active account and how much of your limits you have use
 - **7d** is your 7-day usage limit.
 - **R:** is how long until that limit resets (`45m`, `3h12m`, `1d4h`).
 - Hover over it to see the account email, status, and the exact reset times.
+- A clock icon (🕒) at the end means claude-swap could not check usage just now (for example, the login token expired for a moment), so you are seeing the last known numbers. Hover to see how old they are.
 
 ### Warning colors
 
@@ -117,6 +118,10 @@ The extension could not run `cswap`.
 **The status bar says `Claude: No Active Account`**
 
 Click it and choose an account, or add one with **Add New Account...**.
+
+**The status bar shows a clock icon or `token expired`**
+
+The login token ran out for a moment. Claude Code renews it on its own, and the numbers update on the next check. Nothing to do. If it says `re-login needed` instead, log in to that account in Claude Code again, then run `cswap add`.
 
 **The usage shows something other than a percentage**
 
