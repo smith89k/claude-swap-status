@@ -3,6 +3,11 @@ import * as vscode from 'vscode';
 import { formatAge, formatResetDetail, formatWindow, needsAttention, pickUsage, statusLabel, usageLevel } from '../core/format';
 import type { AccountView } from '../core/types';
 
+/** The main account wears a crown; every other account gets the usual person icon. */
+function icon(view: AccountView): string {
+    return view.isMain ? '👑' : '$(account)';
+}
+
 export class StatusBar implements vscode.Disposable {
     private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 
@@ -23,10 +28,10 @@ export class StatusBar implements vscode.Disposable {
         }
 
         if (!view.signedIn) {
-            this.item.text = `$(account) Claude: ${view.label} | not signed in`;
+            this.item.text = `${icon(view)} ${view.label} | not signed in`;
             this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             this.item.tooltip = view.isMain
-                ? 'Your main Claude login is not signed in. Sign in from the Claude panel.\nClick to switch accounts.'
+                ? 'Your main account (👑) is not signed in. Sign in from the Claude panel.\nClick to switch accounts.'
                 : 'This account is not signed in yet. Sign in from the Claude panel.\nClick to switch accounts.';
             return;
         }
@@ -36,7 +41,7 @@ export class StatusBar implements vscode.Disposable {
         const found = pickUsage(view.entry, now);
         let five = 'N/A';
         let seven = 'N/A';
-        const lines = ['Claude account for this window'];
+        const lines = [view.isMain ? 'Main Claude account (👑) for this window' : 'Claude account for this window'];
         if (view.email) {
             lines.push(`Email: ${view.email}`);
         }
@@ -76,7 +81,7 @@ export class StatusBar implements vscode.Disposable {
         }
         lines.push('Click to switch accounts.');
 
-        this.item.text = `$(account) Claude: ${view.label} | 5h: ${five} | 7d: ${seven}${found?.stale ? ' $(history)' : ''}`;
+        this.item.text = `${icon(view)} ${view.label} | 5h: ${five} | 7d: ${seven}${found?.stale ? ' $(history)' : ''}`;
         this.item.tooltip = lines.join('\n');
     }
 

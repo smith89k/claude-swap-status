@@ -19,7 +19,7 @@ test('missing folder falls back to main', () => {
     const r = resolveWindowEnv({ choice: 'a1', accounts: [acc], folderExists: () => false, originalConfigDir: undefined });
     assert.equal(r.key, 'main');
     assert.equal(r.configDir, undefined);
-    assert.match(r.warning!, /main login/);
+    assert.match(r.warning!, /main account/);
 });
 
 test('unknown account id falls back to main with a warning', () => {

@@ -8,7 +8,7 @@ const H = 3_600_000;
 const at = (ms: number) => new Date(NOW + ms).toISOString();
 
 function view(p: Partial<AccountView> & { key: string }): AccountView {
-    return { label: p.key, isMain: false, isThisWindow: false, signedIn: true, usedBy: [], ...p };
+    return { label: p.key, number: 2, isMain: false, isThisWindow: false, signedIn: true, usedBy: [], openWindows: 0, ...p };
 }
 
 test('this window comes first as current, the rest are others in order', () => {
@@ -76,21 +76,24 @@ test('actions depend on sign-in state and on main vs added', () => {
     const m = toPanelModel([
         view({ key: 'cur', isThisWindow: true }),
         view({ key: 'ok' }),
-        view({ key: 'new', signedIn: false, label: 'New account (not signed in)' }),
+        view({ key: 'new', signedIn: false, label: 'Claude 4' }),
         view({ key: 'old', entry: { status: 'relogin_required' } }),
-        view({ key: 'main', isMain: true, label: 'Main login' }),
+        view({ key: 'main', isMain: true, label: 'Claude 1' }),
     ], NOW);
     assert.deepEqual(m.current!.actions, ['rename', 'remove']);
+    assert.equal(m.current!.canRemove, true);
     const by = Object.fromEntries(m.others.map((a) => [a.key, a]));
     assert.deepEqual(by.ok.actions, ['use', 'rename', 'remove']);
     assert.deepEqual(by.new.actions, ['signIn', 'remove']);
-    assert.equal(by.new.name, 'New account');
+    assert.equal(by.new.name, 'Claude 4');
     assert.equal(by.new.state, 'notSignedIn');
     assert.equal(by.new.note, 'Not signed in yet');
     assert.deepEqual(by.old.actions, ['signInAgain', 'rename', 'remove']);
     assert.equal(by.old.state, 'relogin');
     assert.equal(by.old.note, 'Sign-in expired');
-    assert.deepEqual(by.main.actions, ['use']);
+    assert.deepEqual(by.main.actions, ['use', 'rename', 'remove']);
+    assert.equal(by.main.canRemove, false);
+    assert.match(by.main.removeNote!, /main account/);
 });
 
 test('plan is shown capitalised, problems get a readable note', () => {

@@ -43,6 +43,15 @@ test('an account window exports its folder to Claude and to terminals, and share
     assert.equal(fake.messages.length, 0);
 });
 
+test('the folder is exported before the first pause, so a Claude that starts right after still sees it', async () => {
+    const s = await setup('a1');
+    const pending = applyWindowAccount(s.context, s.main, s.registry, s.log);
+    // Nothing has been awaited yet: Claude's extension could start at this exact moment.
+    assert.equal(process.env.CLAUDE_CONFIG_DIR, s.folder);
+    assert.equal(s.env.vars.get('CLAUDE_CONFIG_DIR'), s.folder);
+    await pending;
+});
+
 test('a main-login window exports the original folder (here: none)', async () => {
     const s = await setup();
     process.env.CLAUDE_CONFIG_DIR = '/left/over';
@@ -57,7 +66,7 @@ test('a window whose account folder is gone falls back to main and says so', asy
     const r = await applyWindowAccount(s.context, s.main, s.registry, s.log);
     assert.equal(r.key, 'main');
     assert.equal(s.state.get(WINDOW_ACCOUNT_KEY), 'main');
-    assert.ok(fake.messages.some((m) => m.level === 'warning' && /main login/.test(m.text)));
+    assert.ok(fake.messages.some((m) => m.level === 'warning' && /main account/.test(m.text)));
     assert.ok(!existsSync(join(s.root, 'accounts', 'zz')));
 });
 

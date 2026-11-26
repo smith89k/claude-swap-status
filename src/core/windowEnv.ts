@@ -4,7 +4,7 @@ import { MAIN_KEY, type Account } from './types';
 /** workspaceState key holding "main" or an account id for this window. */
 export const WINDOW_ACCOUNT_KEY = 'claudeSwap.windowAccount';
 
-export const ACCOUNT_GONE_WARNING = 'The Claude account this window used is gone, so this window is back on your main login.';
+export const ACCOUNT_GONE_WARNING = 'The Claude account this window used is gone, so this window is back on your main account.';
 
 export function resolveWindowEnv(i: {
     choice: string | undefined;

@@ -10,6 +10,7 @@ import { configHome, globalConfigPath } from '../core/paths';
 import type { Registry } from '../core/registry';
 import { buildSnapshot } from '../core/snapshot';
 import { MAIN_KEY, type Account, type AccountView, type ConfigTarget, type Identity } from '../core/types';
+import { removeAccountNow, type RemoveResult } from '../core/removeAccount';
 import { pollAccount, UsageCache } from '../core/usage';
 import { isAccountInUse, WindowRegistry } from '../core/windows';
 
@@ -116,6 +117,7 @@ export class AccountsController implements vscode.Disposable {
             }
         }
         const mainIdentity = await readIdentity(globalConfigPath(this.originalConfigDir));
+        const mainAlias = await this.registry.getMainAlias();
 
         const intervalMs = force ? 0 : this.intervalMs();
         const jobs = [
@@ -136,7 +138,7 @@ export class AccountsController implements vscode.Disposable {
         ));
 
         const usage = await this.cache.read();
-        this.views = buildSnapshot({ accounts, mainIdentity, liveWindows, usage, thisWindowKey: this.thisWindowKey });
+        this.views = buildSnapshot({ accounts, mainIdentity, mainAlias, liveWindows, usage, thisWindowKey: this.thisWindowKey });
         this.loaded = true;
         this.noticeSignIn(accounts, mainIdentity);
         this.emitter.fire(this.views);
@@ -164,10 +166,27 @@ export class AccountsController implements vscode.Disposable {
         }
         const same = (email?: string, org?: string) => email === me.email && (org ?? '') === (me.orgUuid ?? '');
         const twin = accounts.find((a) => a.id !== me.id && same(a.email, a.orgUuid));
-        const twinLabel = twin ? (twin.alias ?? twin.email) : same(mainIdentity?.email, mainIdentity?.orgUuid) ? 'Main login' : undefined;
+        const twinLabel = twin
+            ? this.views.find((v) => v.key === twin.id)?.label
+            : same(mainIdentity?.email, mainIdentity?.orgUuid) ? this.views.find((v) => v.isMain)?.label : undefined;
         if (twinLabel) {
             void vscode.window.showWarningMessage(`"${mine.label}" is the same Claude account as "${twinLabel}". That works, but you may not need both.`);
         }
+    }
+
+    /** Deletes an added account if nothing is using it (no open window, no running Claude). */
+    async removeAccount(id: string): Promise<RemoveResult> {
+        const account = await this.registry.get(id);
+        return removeAccountNow({
+            root: this.root,
+            registry: this.registry,
+            cache: this.cache,
+            credentials: this.credentials,
+            platform: process.platform,
+            id,
+            inUse: async () => !!account && isAccountInUse({ accountKey: id, configHome: account.folder, liveWindows: await this.windows.live() }),
+            log: (line) => this.log.warn(line),
+        });
     }
 
     async shutdown(): Promise<void> {

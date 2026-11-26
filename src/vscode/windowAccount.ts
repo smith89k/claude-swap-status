@@ -18,8 +18,19 @@ export async function applyWindowAccount(
     registry: Registry,
     log: vscode.LogOutputChannel,
 ): Promise<{ key: string; configDir: string | undefined }> {
+    // Decide and export the folder before the first await: Claude's extension can start the
+    // moment this function pauses, and it must already see this window's account.
     const choice = context.workspaceState.get<string>(WINDOW_ACCOUNT_KEY);
-    const resolved = resolveWindowEnv({ choice, accounts: await registry.list(), folderExists: existsSync, originalConfigDir });
+    const resolved = resolveWindowEnv({ choice, accounts: registry.listSync(), folderExists: existsSync, originalConfigDir });
+    const terminalEnv = context.environmentVariableCollection;
+    if (resolved.configDir) {
+        process.env.CLAUDE_CONFIG_DIR = resolved.configDir;
+        terminalEnv.replace('CLAUDE_CONFIG_DIR', resolved.configDir);
+    } else {
+        delete process.env.CLAUDE_CONFIG_DIR;
+        terminalEnv.delete('CLAUDE_CONFIG_DIR');
+    }
+    terminalEnv.description = "Gives Claude in this window's terminals the same account as this window.";
 
     if (resolved.warning) {
         await context.workspaceState.update(WINDOW_ACCOUNT_KEY, MAIN_KEY);
@@ -35,16 +46,6 @@ export async function applyWindowAccount(
             log.warn(`Could not share your Claude setup with this account: ${e?.code ?? e?.name ?? 'error'}`);
         }
     }
-
-    const terminalEnv = context.environmentVariableCollection;
-    if (resolved.configDir) {
-        process.env.CLAUDE_CONFIG_DIR = resolved.configDir;
-        terminalEnv.replace('CLAUDE_CONFIG_DIR', resolved.configDir);
-    } else {
-        delete process.env.CLAUDE_CONFIG_DIR;
-        terminalEnv.delete('CLAUDE_CONFIG_DIR');
-    }
-    terminalEnv.description = "Gives Claude in this window's terminals the same account as this window.";
 
     const claudeSettings = vscode.workspace.getConfiguration('claudeCode').get('environmentVariables');
     if (findConfigDirOverride(claudeSettings)) {

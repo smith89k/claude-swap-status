@@ -5,6 +5,8 @@ import type { AccountView, UsageWindow } from './types';
 
 export const CHROME_HINT = 'Claude in Chrome works only in windows that use the same account as the Chrome extension.';
 
+export const MAIN_REMOVE_NOTE = "This is your main account (the crown): your normal Claude login. It can't be deleted because its folder holds your settings and chat history.";
+
 const FIVE_HOURS_MS = 5 * 3_600_000;
 const SEVEN_DAYS_MS = 7 * 24 * 3_600_000;
 
@@ -34,6 +36,10 @@ export interface PanelAccount {
     note?: string;
     meters: PanelMeter[];
     actions: PanelAction[];
+    /** False for Claude 1: it is Claude's own folder, so the delete icon is shown greyed out. */
+    canRemove: boolean;
+    /** Why it can't be removed, shown on the greyed-out delete icon. */
+    removeNote?: string;
 }
 
 export interface PanelModel {
@@ -112,24 +118,25 @@ function toAccount(v: AccountView, now: number): PanelAccount {
     } else if (!v.isThisWindow) {
         actions.push('use');
     }
-    if (!v.isMain) {
-        if (v.signedIn) {
-            actions.push('rename');
-        }
-        actions.push('remove');
+    if (v.signedIn || v.isMain) {
+        actions.push('rename');
     }
+    actions.push('remove');
 
     const a: PanelAccount = {
         key: v.key,
-        // The note already says "Not signed in yet", so the name doesn't repeat it.
-        name: v.signedIn || v.isMain ? v.label : 'New account',
+        name: v.label,
         detail: detailFor(v),
         isMain: v.isMain,
         isThisWindow: v.isThisWindow,
         state,
         meters,
         actions,
+        canRemove: !v.isMain,
     };
+    if (v.isMain) {
+        a.removeNote = MAIN_REMOVE_NOTE;
+    }
     if (v.email) {
         a.email = v.email;
     }

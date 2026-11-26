@@ -46,7 +46,7 @@
       },
       {
         "command": "claudeSwap.useMainLogin",
-        "title": "Use Main Login in This Window",
+        "title": "Switch This Window to the Main Account",
         "category": "Claude Swap"
       },
       {
@@ -56,7 +56,7 @@
       },
       {
         "command": "claudeSwap.removeAccount",
-        "title": "Remove Account",
+        "title": "Delete Account",
         "category": "Claude Swap"
       },
       {

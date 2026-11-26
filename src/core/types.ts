@@ -52,6 +52,8 @@ export interface Account {
     orgUuid?: string;
     orgName?: string;
     alias?: string;
+    /** Shown as "Claude <number>". Claude 1 is the main login, so added accounts start at 2. */
+    number?: number;
     createdAt: string;
 }
 
@@ -71,6 +73,8 @@ export interface WindowBeat {
 
 export interface AccountView {
     key: string;
+    /** 1 for the main login, 2 and up for added accounts. */
+    number: number;
     label: string;
     email?: string;
     orgName?: string;
@@ -78,5 +82,7 @@ export interface AccountView {
     isThisWindow: boolean;
     signedIn: boolean;
     usedBy: string[];
+    /** How many open windows use this account right now. */
+    openWindows: number;
     entry?: UsageEntry;
 }

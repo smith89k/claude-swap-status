@@ -40,14 +40,18 @@ p { margin: 0; }
 
 /* Each account sits in its own box, with the same space above and below its text.
    The current window's box keeps the accent edge. */
+main { container-type: inline-size; }
+
 .others {
     display: grid;
+    grid-template-columns: minmax(0, 1fr); /* boxes may shrink below their content's width */
     gap: 8px;
     padding: 0 8px;
 }
 .others h2 { margin: 14px 6px 0; }
 
 .account {
+    min-width: 0;
     padding: 10px 12px;
     border: 1px solid var(--box);
     border-radius: 4px;
@@ -65,10 +69,13 @@ body.vscode-high-contrast .account.is-current {
     border-left-width: 3px;
 }
 
+/* Name, plan, tools and button share one line while they fit; on a narrow sidebar
+   the tools and button wrap to a second line instead of squeezing the name. */
 .acc-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 4px 6px;
     min-height: 22px;
 }
 
@@ -82,6 +89,17 @@ body.vscode-high-contrast .account.is-current {
 }
 .is-current .acc-name { font-size: 1.08em; }
 
+/* The main account wears a crown. */
+.acc-crown {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    color: var(--vscode-charts-yellow, #cca700);
+}
+.acc-crown svg { width: 15px; height: 15px; }
+
 .acc-plan {
     flex: none;
     padding: 0 5px;
@@ -92,10 +110,26 @@ body.vscode-high-contrast .account.is-current {
     background: var(--vscode-badge-background);
 }
 
+.acc-end {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+.account { position: relative; }
+.acc-end.only-tools {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+}
+.acc-end.only-tools .acc-tools {
+    border-radius: 3px;
+    background: var(--vscode-sideBar-background, transparent);
+}
+
 .acc-tools {
     display: flex;
     gap: 2px;
-    margin-left: auto;
     opacity: 0;
     transition: opacity 0.12s;
 }
@@ -117,6 +151,8 @@ body.vscode-high-contrast .account.is-current {
 }
 .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, var(--rule)); }
 .icon-btn svg { width: 16px; height: 16px; }
+.icon-btn.is-blocked { opacity: 0.4; cursor: default; }
+.icon-btn.is-blocked:hover { background: transparent; }
 
 .acc-email {
     overflow: hidden;
@@ -130,12 +166,13 @@ body.vscode-high-contrast .account.is-current {
 .meters {
     display: grid;
     gap: 5px;
+    max-width: 440px; /* on a very wide sidebar, keep the segments small */
     margin-top: 9px;
 }
 
 .meter {
     display: grid;
-    grid-template-columns: 1.9em 1fr 3.2em 3.6em;
+    grid-template-columns: 1.9em minmax(0, 1fr) 3.2em 3.6em;
     align-items: center;
     gap: 7px;
     font-size: 12px;
@@ -248,4 +285,13 @@ body.vscode-high-contrast .meter-bar { outline: 1px solid var(--vscode-contrastB
 button:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: 1px;
+}
+
+/* Narrow sidebar: drop the reset time (it stays in the meter's tooltip) to give the bar room. */
+@container (max-width: 250px) {
+    .meter { grid-template-columns: 1.7em minmax(0, 1fr) 2.9em; gap: 6px; }
+    .meter-reset { display: none; }
+    .account { padding: 10px 10px; }
+    .account.is-current { margin: 0 6px; }
+    .others { padding: 0 6px; }
 }

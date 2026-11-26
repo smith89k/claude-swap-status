@@ -14,7 +14,8 @@
         rename: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm3.83-2.06L4.47 9.76l8-8 1.77 1.77-8 8z"/></svg>',
         remove: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10 3h3v1h-1v9l-1 1H5l-1-1V4H3V3h3V2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1zM9 2H7v1h2V2zM5 4v9h6V4H5zm1 2h1v5H6V6zm3 0h1v5H9V6z"/></svg>',
     };
-    const TOOL_LABEL = { rename: 'Rename', remove: 'Remove' };
+    const TOOL_LABEL = { rename: 'Rename', remove: 'Delete' };
+    const CROWN = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.3 4.2 4.9 7 8 2.2 11.1 7l3.6-2.8-1.3 7.3H2.6L1.3 4.2zM2.7 12.6h10.6V14H2.7z"/></svg>';
 
     function el(tag, className, text) {
         const node = document.createElement(tag);
@@ -67,24 +68,40 @@
         }
 
         const head = el('div', 'acc-head');
+        if (a.isMain) {
+            // The crown marks the main account (your normal Claude login), whatever its name.
+            const crown = el('span', 'acc-crown');
+            crown.innerHTML = CROWN;
+            crown.title = 'Main account: your normal Claude login';
+            crown.setAttribute('role', 'img');
+            crown.setAttribute('aria-label', 'Main account');
+            head.append(crown);
+        }
         head.append(el('span', 'acc-name', a.name));
         if (a.plan) {
             head.append(el('span', 'acc-plan', a.plan));
         }
+        // Tools and the main button travel together: on a narrow sidebar they wrap to the
+        // next line as one group, still aligned to the right.
+        const end = el('div', 'acc-end');
         const tools = el('div', 'acc-tools');
         for (const action of ['rename', 'remove']) {
             if (!a.actions.includes(action)) {
                 continue;
             }
-            const b = el('button', 'icon-btn');
+            const blocked = action === 'remove' && a.canRemove === false;
+            const b = el('button', 'icon-btn' + (blocked ? ' is-blocked' : ''));
             b.type = 'button';
             b.innerHTML = ICONS[action];
-            b.title = TOOL_LABEL[action];
-            b.setAttribute('aria-label', TOOL_LABEL[action] + ' ' + a.name);
+            b.title = blocked ? a.removeNote : TOOL_LABEL[action];
+            b.setAttribute('aria-label', blocked ? a.removeNote : TOOL_LABEL[action] + ' ' + a.name);
+            if (blocked) {
+                b.setAttribute('aria-disabled', 'true');
+            }
             b.addEventListener('click', () => send(action, a.key));
             tools.append(b);
         }
-        head.append(tools);
+        end.append(tools);
         const main = a.actions.find((x) => BUTTON_TEXT[x]);
         if (main) {
             const b = el('button', 'btn btn-small ' + (main === 'use' ? 'btn-secondary' : 'btn-primary'), BUTTON_TEXT[main]);
@@ -92,8 +109,13 @@
             b.title = BUTTON_TITLE[main];
             b.setAttribute('aria-label', BUTTON_TEXT[main] + ': ' + a.name);
             b.addEventListener('click', () => send(main, a.key));
-            head.append(b);
+            end.append(b);
         }
+        if (!main) {
+            // Only the hover icons: let them float over the card instead of taking a line.
+            end.classList.add('only-tools');
+        }
+        head.append(end);
         block.append(head);
 
         if (a.email && a.email !== a.name) {

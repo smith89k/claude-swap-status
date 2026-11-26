@@ -40,7 +40,8 @@ It is published on [Open VSX](https://open-vsx.org/extension/smith89k/claude-swa
 
 ## How it works
 
-- Your normal Claude login is the **Main login**. Every window uses it until you pick something else.
+- Your normal Claude login is your **main account**, marked with a crown 👑. It starts as **Claude 1**, and every window uses it until you pick something else.
+- Accounts you add start as **Claude 2**, **Claude 3**, and so on. You can rename any account, the main one included, and the new name replaces the starting one.
 - Each extra account gets its own Claude folder inside `~/.claude-accounts`.
 - Each window remembers which account it uses. When the window opens, the extension tells Claude in that window to use that account's folder, before Claude starts. Terminals in that window get the same account.
 - Your settings, plugins, skills, memory and chat history are shared with every account. Only the login is different.
@@ -49,7 +50,7 @@ It is published on [Open VSX](https://open-vsx.org/extension/smith89k/claude-swa
 
 1. Click the **Claude Accounts** icon in the Activity Bar, then **Add account**. (Or run **Claude Swap: Add Account** from the Command Palette.)
 2. The window reloads, and the Claude panel asks you to sign in. Sign in with the other account.
-3. The new account appears with its email. You can give it a short name, like `work`.
+3. The new account appears with the next free number, like **Claude 2**. Rename it whenever you like, for example to `work`.
 
 ## Switch a window's account
 
@@ -62,14 +63,18 @@ Switching reloads the window, so let Claude finish what it is doing first.
 - **This window** shows the account this window uses, with its 5-hour and weekly meters.
 - The small tick on each meter shows how much of that time window has already passed. If the bar reaches past the tick, you are using that limit faster than time is passing.
 - **Other accounts** shows every other account, its usage, and which windows it is open in. Click **Use here** to switch this window to it.
-- Hover an account to rename or remove it.
+- Hover an account to rename or delete it.
+- The main account 👑 can be renamed but not deleted, because its folder is Claude's own (your settings and chat history live there). Its delete icon is greyed out.
+- Deleting the account this window uses switches the window to your main account and reloads it first, then deletes the account.
+- The panel fits any sidebar width. On a narrow sidebar the buttons move under the name and the reset times move into the tooltip.
 
 ## The status bar
 
 ```text
-👤 Claude: work | 5h: █░░░░ 25% R:3h12m | 7d: █░░░░ 16% R:1d4h
+👤 work | 5h: █░░░░ 25% R:3h12m | 7d: █░░░░ 16% R:1d4h
 ```
 
+- The main account shows 👑 instead of 👤.
 - **5h** is your 5-hour usage limit, and **7d** is your weekly limit.
 - **R:** is how long until that limit resets (`45m`, `3h12m`, `1d4h`).
 - Hover over it to see the email, plan and exact reset times.
@@ -92,9 +97,9 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 | `Claude Swap: Switch Account`                 | Pick the account for this window.                         |
 | `Claude Swap: Add Account`                    | Add a new account. The window reloads so you can sign in. |
 | `Claude Swap: Use Account in This Window`     | Same as Switch Account, without the extra menu items.     |
-| `Claude Swap: Use Main Login in This Window`  | Put this window back on your normal login.                |
-| `Claude Swap: Rename Account`                 | Give an account a short name.                             |
-| `Claude Swap: Remove Account`                 | Remove an account you no longer use.                      |
+| `Claude Swap: Switch This Window to the Main Account` | Put this window back on your normal login.   |
+| `Claude Swap: Rename Account`                 | Give an account a new name, like "work".                 |
+| `Claude Swap: Delete Account`                 | Delete an account you no longer use.                      |
 | `Claude Swap: Refresh Usage`                  | Update the usage numbers right now.                       |
 | `Claude Swap: Open Accounts Panel`            | Show the side panel.                                      |
 
@@ -107,9 +112,9 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 
 ## Good to know
 
-- **Windows only:** your `settings.json`, `CLAUDE.md` and `keybindings.json` are copied into each account's folder when a window opens. Make changes to them in a Main login window; a change made in an account window is replaced the next time it opens. On macOS and Linux they are shared directly.
-- **Claude in Chrome** works only in windows that use the same claude.ai account as the Chrome extension. Your Chrome extension is usually signed in to your Main login, so windows on other accounts can't use Chrome tools. To use Chrome with another account, sign the Chrome extension in to that account, then type `/chrome` in Claude in that window to turn it on. Windows on your Main login lose Chrome until you sign the extension back in.
-- **Removing an account** deletes only that account's folder in `~/.claude-accounts`. Your shared chat history, memory and settings stay where they are.
+- **Windows only:** your `settings.json`, `CLAUDE.md` and `keybindings.json` are copied into each account's folder when a window opens. Make changes to them in a window on your main account; a change made in an account window is replaced the next time it opens. On macOS and Linux they are shared directly.
+- **Claude in Chrome** works only in windows that use the same claude.ai account as the Chrome extension. Your Chrome extension is usually signed in to your main account, so windows on other accounts can't use Chrome tools. To use Chrome with another account, sign the Chrome extension in to that account, then type `/chrome` in Claude in that window to turn it on. Windows on your main account lose Chrome until you sign the extension back in.
+- **Deleting an account** removes only that account's folder in `~/.claude-accounts`. Your shared chat history, memory and settings stay where they are.
 - **Usage numbers** come from an unofficial Claude endpoint, so they could stop working if Anthropic changes it.
 - **Logins are kept fresh safely.** Claude renews the login of any account that is in use. The extension only renews a login when no window and no Claude session is using that account, so nobody gets signed out.
 - **Remote windows** (SSH, WSL, dev containers) are not supported yet.

@@ -6,6 +6,7 @@ import { AccountsPanelProvider } from './vscode/accountsPanel';
 import { registerCommands } from './vscode/commands';
 import { AccountsController } from './vscode/controller';
 import { StatusBar } from './vscode/statusBar';
+import { finishPendingRemoval } from './vscode/pendingRemoval';
 import { applyWindowAccount } from './vscode/windowAccount';
 
 // What the editor was started with, before this extension changes anything.
@@ -43,6 +44,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
     registerCommands(context, c);
 
     c.start();
+    // If this window was switched to Claude 1 to delete its old account, finish that now.
+    void finishPendingRemoval(context.workspaceState, (id) => c.removeAccount(id)).then(() => c.refresh(true));
 
     return {
         thisWindowKey: () => c.thisWindowKey,

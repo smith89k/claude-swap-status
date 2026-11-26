@@ -34,7 +34,7 @@ __export(extension_exports, {
   deactivate: () => deactivate
 });
 module.exports = __toCommonJS(extension_exports);
-var vscode6 = __toESM(require("vscode"));
+var vscode7 = __toESM(require("vscode"));
 
 // src/core/paths.ts
 var import_node_crypto = require("node:crypto");
@@ -109,6 +109,7 @@ function keychainAccount(env = process.env) {
 }
 
 // src/core/registry.ts
+var import_node_fs2 = require("node:fs");
 var import_promises3 = require("node:fs/promises");
 var path4 = __toESM(require("node:path"));
 
@@ -232,6 +233,36 @@ async function withConfigLock(globalConfig, fn) {
 }
 
 // src/core/registry.ts
+function effectiveNumbers(accounts) {
+  const out = /* @__PURE__ */ new Map();
+  const taken = /* @__PURE__ */ new Set([1]);
+  for (const a of accounts) {
+    if (typeof a.number === "number" && a.number >= 2 && !taken.has(a.number)) {
+      out.set(a.id, a.number);
+      taken.add(a.number);
+    }
+  }
+  let next = 2;
+  for (const a of accounts) {
+    if (out.has(a.id)) {
+      continue;
+    }
+    while (taken.has(next)) {
+      next++;
+    }
+    out.set(a.id, next);
+    taken.add(next);
+  }
+  return out;
+}
+function lowestFree(accounts) {
+  const used = new Set(effectiveNumbers(accounts).values());
+  let n = 2;
+  while (used.has(n)) {
+    n++;
+  }
+  return n;
+}
 var Registry = class {
   file;
   lockPath;
@@ -239,34 +270,60 @@ var Registry = class {
     this.file = path4.join(root, "accounts.json");
     this.lockPath = path4.join(root, "accounts.json.lock");
   }
-  async list() {
+  async readFile() {
     try {
-      const data = await readJson(this.file);
-      return Array.isArray(data?.accounts) ? data.accounts : [];
+      return await readJson(this.file);
     } catch (e) {
       if (e instanceof CorruptJsonError) {
-        return [];
+        return void 0;
       }
       throw e;
+    }
+  }
+  async list() {
+    const data = await this.readFile();
+    return Array.isArray(data?.accounts) ? data.accounts : [];
+  }
+  /** Same as list(), without waiting: used at window start, before Claude launches. */
+  listSync() {
+    try {
+      const data = JSON.parse((0, import_node_fs2.readFileSync)(this.file, "utf8"));
+      return Array.isArray(data?.accounts) ? data.accounts : [];
+    } catch {
+      return [];
     }
   }
   async get(id) {
     return (await this.list()).find((a) => a.id === id);
   }
+  async getMainAlias() {
+    const alias = (await this.readFile())?.mainAlias;
+    return typeof alias === "string" && alias ? alias : void 0;
+  }
+  async setMainAlias(alias) {
+    await this.mutate((file) => {
+      if (alias) {
+        file.mainAlias = alias;
+      } else {
+        delete file.mainAlias;
+      }
+    });
+  }
   async add(a) {
-    const account = { id: a.id, folder: a.folder, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
-    await this.mutate((accounts) => {
-      if (accounts.some((x) => x.id === a.id)) {
+    let account;
+    await this.mutate((file) => {
+      if (file.accounts.some((x) => x.id === a.id)) {
         throw new Error(`Account ${a.id} already exists`);
       }
-      accounts.push(account);
+      account = { id: a.id, folder: a.folder, number: lowestFree(file.accounts), createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+      file.accounts.push(account);
     });
     return account;
   }
   async update(id, patch) {
     let updated;
-    await this.mutate((accounts) => {
-      const found = accounts.find((x) => x.id === id);
+    await this.mutate((file) => {
+      const found = file.accounts.find((x) => x.id === id);
       if (!found) {
         throw new Error(`No account ${id}`);
       }
@@ -286,29 +343,30 @@ var Registry = class {
     return updated;
   }
   async remove(id) {
-    await this.mutate((accounts) => {
-      const i = accounts.findIndex((x) => x.id === id);
+    await this.mutate((file) => {
+      const i = file.accounts.findIndex((x) => x.id === id);
       if (i >= 0) {
-        accounts.splice(i, 1);
+        file.accounts.splice(i, 1);
       }
     });
   }
   /** Read, change and write the file under the registry lock. A corrupt file is set aside first. */
   async mutate(change) {
     await withLock(this.lockPath, { staleMs: 1e4 }, async () => {
-      let accounts = [];
+      let file = { version: 1, accounts: [] };
       try {
         const data = await readJson(this.file);
-        accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+        if (data && typeof data === "object") {
+          file = { ...data, version: 1, accounts: Array.isArray(data.accounts) ? data.accounts : [] };
+        }
       } catch (e) {
         if (!(e instanceof CorruptJsonError)) {
           throw e;
         }
         await (0, import_promises3.rename)(this.file, `${this.file}.corrupt-${Date.now()}`);
       }
-      change(accounts);
-      const next = { version: 1, accounts };
-      await writeJsonAtomic(this.file, next);
+      change(file);
+      await writeJsonAtomic(this.file, file);
     });
   }
 };
@@ -409,6 +467,7 @@ function ageOf(at, now) {
 
 // src/core/panelModel.ts
 var CHROME_HINT = "Claude in Chrome works only in windows that use the same account as the Chrome extension.";
+var MAIN_REMOVE_NOTE = "This is your main account (the crown): your normal Claude login. It can't be deleted because its folder holds your settings and chat history.";
 var FIVE_HOURS_MS = 5 * 36e5;
 var SEVEN_DAYS_MS = 7 * 24 * 36e5;
 function meter(label, w, now) {
@@ -473,23 +532,24 @@ function toAccount(v, now) {
   } else if (!v.isThisWindow) {
     actions.push("use");
   }
-  if (!v.isMain) {
-    if (v.signedIn) {
-      actions.push("rename");
-    }
-    actions.push("remove");
+  if (v.signedIn || v.isMain) {
+    actions.push("rename");
   }
+  actions.push("remove");
   const a = {
     key: v.key,
-    // The note already says "Not signed in yet", so the name doesn't repeat it.
-    name: v.signedIn || v.isMain ? v.label : "New account",
+    name: v.label,
     detail: detailFor(v),
     isMain: v.isMain,
     isThisWindow: v.isThisWindow,
     state,
     meters,
-    actions
+    actions,
+    canRemove: !v.isMain
   };
+  if (v.isMain) {
+    a.removeNote = MAIN_REMOVE_NOTE;
+  }
   if (v.email) {
     a.email = v.email;
   }
@@ -596,63 +656,19 @@ var AccountsPanelProvider = class {
 };
 
 // src/vscode/commands.ts
-var vscode2 = __toESM(require("vscode"));
-var import_promises6 = require("node:fs/promises");
-
-// src/core/safeDelete.ts
-var import_promises4 = require("node:fs/promises");
-var path5 = __toESM(require("node:path"));
-async function removeLink(p) {
-  try {
-    await (0, import_promises4.unlink)(p);
-  } catch (e) {
-    if (e?.code === "EPERM" || e?.code === "EISDIR") {
-      await (0, import_promises4.rmdir)(p);
-    } else if (e?.code !== "ENOENT") {
-      throw e;
-    }
-  }
-}
-async function deleteTree(p) {
-  let st;
-  try {
-    st = await (0, import_promises4.lstat)(p);
-  } catch (e) {
-    if (e?.code === "ENOENT") {
-      return;
-    }
-    throw e;
-  }
-  if (st.isSymbolicLink()) {
-    await removeLink(p);
-    return;
-  }
-  if (st.isDirectory()) {
-    for (const name of await (0, import_promises4.readdir)(p)) {
-      await deleteTree(path5.join(p, name));
-    }
-    await (0, import_promises4.rmdir)(p);
-    return;
-  }
-  await (0, import_promises4.unlink)(p);
-}
-async function removeAccountFolder(root, folder) {
-  if (!isInside(root, folder)) {
-    throw new Error("Refusing to delete a folder outside the accounts folder");
-  }
-  await deleteTree(folder);
-}
+var vscode3 = __toESM(require("vscode"));
+var import_promises5 = require("node:fs/promises");
 
 // src/core/share.ts
-var import_promises5 = require("node:fs/promises");
-var path6 = __toESM(require("node:path"));
+var import_promises4 = require("node:fs/promises");
+var path5 = __toESM(require("node:path"));
 var SHARED_DIRS = ["projects", "plugins", "skills", "commands", "agents", "output-styles", "rules", "plans"];
 var SHARED_FILES = ["settings.json", "CLAUDE.md", "keybindings.json"];
 var PROMPT_HISTORY = "history.jsonl";
 var MANIFEST = ".claude-accounts-manifest.json";
 async function exists(p, kind) {
   try {
-    const st = await (0, import_promises5.stat)(p);
+    const st = await (0, import_promises4.stat)(p);
     return kind === "dir" ? st.isDirectory() : st.isFile();
   } catch {
     return false;
@@ -660,7 +676,7 @@ async function exists(p, kind) {
 }
 async function isMissing(p) {
   try {
-    await (0, import_promises5.lstat)(p);
+    await (0, import_promises4.lstat)(p);
     return false;
   } catch (e) {
     return e?.code === "ENOENT";
@@ -668,7 +684,7 @@ async function isMissing(p) {
 }
 async function readManifest(accountHome) {
   try {
-    const m = await readJson(path6.join(accountHome, MANIFEST));
+    const m = await readJson(path5.join(accountHome, MANIFEST));
     return { links: Array.isArray(m?.links) ? m.links : [], copies: Array.isArray(m?.copies) ? m.copies : [] };
   } catch {
     return { links: [], copies: [] };
@@ -680,30 +696,30 @@ async function syncSharedSetup(o) {
   const links = new Set(manifest.links);
   const copies = new Set(manifest.copies);
   for (const name of SHARED_DIRS) {
-    const src = path6.join(o.mainHome, name);
-    const dst = path6.join(o.accountHome, name);
+    const src = path5.join(o.mainHome, name);
+    const dst = path5.join(o.accountHome, name);
     if (await exists(src, "dir") && await isMissing(dst)) {
-      await (0, import_promises5.symlink)(src, dst, windows ? "junction" : "dir");
+      await (0, import_promises4.symlink)(src, dst, windows ? "junction" : "dir");
       links.add(name);
     }
   }
   const files = windows ? SHARED_FILES : [...SHARED_FILES, PROMPT_HISTORY];
   for (const name of files) {
-    const src = path6.join(o.mainHome, name);
-    const dst = path6.join(o.accountHome, name);
+    const src = path5.join(o.mainHome, name);
+    const dst = path5.join(o.accountHome, name);
     if (!await exists(src, "file")) {
       continue;
     }
     if (windows) {
-      await (0, import_promises5.copyFile)(src, dst);
+      await (0, import_promises4.copyFile)(src, dst);
       copies.add(name);
     } else if (await isMissing(dst)) {
-      await (0, import_promises5.symlink)(src, dst, "file");
+      await (0, import_promises4.symlink)(src, dst, "file");
       links.add(name);
     }
   }
   const next = { links: [...links], copies: [...copies] };
-  await writeJsonAtomic(path6.join(o.accountHome, MANIFEST), next);
+  await writeJsonAtomic(path5.join(o.accountHome, MANIFEST), next);
   return next;
 }
 async function readObject(file) {
@@ -754,7 +770,7 @@ var MAIN_KEY = "main";
 
 // src/core/windowEnv.ts
 var WINDOW_ACCOUNT_KEY = "claudeSwap.windowAccount";
-var ACCOUNT_GONE_WARNING = "The Claude account this window used is gone, so this window is back on your main login.";
+var ACCOUNT_GONE_WARNING = "The Claude account this window used is gone, so this window is back on your main account.";
 function resolveWindowEnv(i) {
   if (!i.choice || i.choice === MAIN_KEY) {
     return { key: MAIN_KEY, configDir: i.originalConfigDir };
@@ -772,9 +788,37 @@ function findConfigDirOverride(envVars) {
   return envVars.some((v) => v && typeof v === "object" && v.name === "CLAUDE_CONFIG_DIR" && typeof v.value === "string" && v.value !== "");
 }
 
+// src/vscode/pendingRemoval.ts
+var vscode2 = __toESM(require("vscode"));
+var PENDING_REMOVE_KEY = "claudeSwap.pendingRemove";
+var sleep2 = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+async function finishPendingRemoval(state, run, opts = { tries: 6, delayMs: 2e3 }) {
+  const pending = state.get(PENDING_REMOVE_KEY);
+  if (!pending || typeof pending.id !== "string") {
+    return;
+  }
+  await state.update(PENDING_REMOVE_KEY, void 0);
+  for (let i = 0; i < opts.tries; i++) {
+    const r = await run(pending.id);
+    if (r === "removed") {
+      void vscode2.window.showInformationMessage(`Deleted "${pending.label}".`);
+      return;
+    }
+    if (r === "missing") {
+      return;
+    }
+    if (i < opts.tries - 1) {
+      await sleep2(opts.delayMs);
+    }
+  }
+  void vscode2.window.showWarningMessage(
+    `Couldn't delete "${pending.label}" yet because Claude is still using it. Try again from the Claude Accounts panel in a moment.`
+  );
+}
+
 // src/vscode/commands.ts
 function registerCommands(context, c) {
-  const reg = (id, fn) => context.subscriptions.push(vscode2.commands.registerCommand(id, fn));
+  const reg = (id, fn) => context.subscriptions.push(vscode3.commands.registerCommand(id, fn));
   const viewFor = (arg) => {
     const key = typeof arg === "string" ? arg : arg?.key;
     return key ? c.views.find((v) => v.key === key) : void 0;
@@ -798,24 +842,24 @@ function registerCommands(context, c) {
   };
   const pickAccount = async (placeHolder, filter = () => true) => {
     const items = c.views.filter(filter).map((v) => ({
-      label: `${v.isThisWindow ? "$(check) " : ""}${v.label}`,
+      label: `${v.isThisWindow ? "$(check) " : ""}${v.isMain ? "\u{1F451} " : ""}${v.label}`,
       description: v.email && v.email !== v.label ? v.email : void 0,
       detail: usageSummary(v),
       view: v
     }));
-    const pick = await vscode2.window.showQuickPick(items, { placeHolder });
+    const pick = await vscode3.window.showQuickPick(items, { placeHolder });
     return pick?.view;
   };
   const confirmReload = async (message) => {
-    const config = vscode2.workspace.getConfiguration("claudeSwap");
+    const config = vscode3.workspace.getConfiguration("claudeSwap");
     if (!config.get("confirmBeforeReload", true)) {
       return true;
     }
     const reload = "Reload";
     const always = "Reload, don't ask again";
-    const pick = await vscode2.window.showInformationMessage(message, { modal: true }, reload, always);
+    const pick = await vscode3.window.showInformationMessage(message, { modal: true }, reload, always);
     if (pick === always) {
-      await config.update("confirmBeforeReload", false, vscode2.ConfigurationTarget.Global);
+      await config.update("confirmBeforeReload", false, vscode3.ConfigurationTarget.Global);
     }
     return pick === reload || pick === always;
   };
@@ -827,21 +871,21 @@ function registerCommands(context, c) {
       return;
     }
     await context.workspaceState.update(WINDOW_ACCOUNT_KEY, key);
-    await vscode2.commands.executeCommand("workbench.action.reloadWindow");
+    await vscode3.commands.executeCommand("workbench.action.reloadWindow");
   };
   reg("claudeSwap.switchAccount", async () => {
     const items = c.views.map((v) => ({
-      label: `${v.isThisWindow ? "$(check) " : ""}${v.label}`,
+      label: `${v.isThisWindow ? "$(check) " : ""}${v.isMain ? "\u{1F451} " : ""}${v.label}`,
       description: v.email && v.email !== v.label ? v.email : void 0,
       detail: [usageSummary(v), v.usedBy.length ? `open in ${v.usedBy.join(", ")}` : ""].filter(Boolean).join("   \xB7   "),
       run: () => switchTo(v.key, v.label)
     }));
     items.push(
-      { label: "", kind: vscode2.QuickPickItemKind.Separator, run: () => void 0 },
-      { label: "$(add) Add account\u2026", run: () => vscode2.commands.executeCommand("claudeSwap.addAccount") },
-      { label: "$(list-tree) Open accounts panel", run: () => vscode2.commands.executeCommand("claudeSwap.openPanel") }
+      { label: "", kind: vscode3.QuickPickItemKind.Separator, run: () => void 0 },
+      { label: "$(add) Add account\u2026", run: () => vscode3.commands.executeCommand("claudeSwap.addAccount") },
+      { label: "$(list-tree) Open accounts panel", run: () => vscode3.commands.executeCommand("claudeSwap.openPanel") }
     );
-    const pick = await vscode2.window.showQuickPick(items, { placeHolder: "Pick the Claude account for this window" });
+    const pick = await vscode3.window.showQuickPick(items, { placeHolder: "Pick the Claude account for this window" });
     await pick?.run();
   });
   reg("claudeSwap.useInThisWindow", async (arg) => {
@@ -851,7 +895,7 @@ function registerCommands(context, c) {
     }
   });
   reg("claudeSwap.useMainLogin", async () => {
-    await switchTo(MAIN_KEY, "Main login");
+    await switchTo(MAIN_KEY, c.views.find((v) => v.isMain)?.label ?? "Claude 1");
   });
   reg("claudeSwap.addAccount", async () => {
     if (!await confirmReload("Add a new Claude account? This window will reload and Claude will ask you to sign in.")) {
@@ -860,64 +904,83 @@ function registerCommands(context, c) {
     const id = newAccountId();
     const folder = accountFolder(c.root, id);
     try {
-      await (0, import_promises6.mkdir)(folder, { recursive: true });
+      await (0, import_promises5.mkdir)(folder, { recursive: true });
       await seedGlobalConfig(globalConfigPath(c.originalConfigDir), globalConfigPath(folder));
       await syncSharedSetup({ mainHome: configHome(c.originalConfigDir), accountHome: folder, platform: process.platform });
       await c.registry.add({ id, folder });
     } catch (e) {
       c.log.error(`add account failed: ${e?.code ?? e?.name ?? "error"}`);
-      void vscode2.window.showErrorMessage(`Could not add the account: ${e?.message ?? "unknown error"}`);
+      void vscode3.window.showErrorMessage(`Could not add the account: ${e?.message ?? "unknown error"}`);
       return;
     }
     await context.workspaceState.update(WINDOW_ACCOUNT_KEY, id);
-    await vscode2.commands.executeCommand("workbench.action.reloadWindow");
+    await vscode3.commands.executeCommand("workbench.action.reloadWindow");
   });
   reg("claudeSwap.renameAccount", async (arg) => {
-    const v = viewFor(arg) ?? await pickAccount("Pick an account to rename", (x) => !x.isMain);
-    if (!v || v.isMain) {
+    const v = viewFor(arg) ?? await pickAccount("Pick an account to rename");
+    if (!v) {
       return;
     }
-    const account = await c.registry.get(v.key);
-    const value = await vscode2.window.showInputBox({
-      prompt: "Short name for this account (leave empty to show the email)",
-      value: account?.alias ?? "",
+    const current = v.isMain ? await c.registry.getMainAlias() : (await c.registry.get(v.key))?.alias;
+    const value = await vscode3.window.showInputBox({
+      prompt: `New name for "${v.label}". Leave empty to go back to "Claude ${v.number}".`,
+      value: current ?? "",
       validateInput: (s) => s.length > 30 ? "Keep it under 30 characters." : void 0
     });
     if (value === void 0) {
       return;
     }
-    await c.registry.update(v.key, { alias: value.trim() });
-    await c.refresh();
+    if (v.isMain) {
+      await c.registry.setMainAlias(value.trim());
+    } else {
+      await c.registry.update(v.key, { alias: value.trim() });
+    }
+    await c.refresh(true);
   });
   reg("claudeSwap.removeAccount", async (arg) => {
-    const v = viewFor(arg) ?? await pickAccount("Pick an account to remove", (x) => !x.isMain);
-    if (!v || v.isMain) {
+    const v = viewFor(arg) ?? await pickAccount("Pick an account to delete", (x) => !x.isMain);
+    if (!v) {
       return;
     }
-    if (v.usedBy.length) {
-      void vscode2.window.showWarningMessage(`"${v.label}" is open in: ${v.usedBy.join(", ")}. Switch those windows to another account first.`);
+    if (v.isMain) {
+      void vscode3.window.showInformationMessage(MAIN_REMOVE_NOTE);
       return;
     }
-    const pick = await vscode2.window.showWarningMessage(`Remove "${v.label}"? You'll need to sign in again to use it later.`, { modal: true }, "Remove");
-    if (pick !== "Remove") {
+    const otherWindows = v.openWindows - (v.isThisWindow ? 1 : 0);
+    if (otherWindows > 0) {
+      void vscode3.window.showWarningMessage(`"${v.label}" is open in another window (${v.usedBy.join(", ")}). Switch that window to another account first, then delete it.`);
       return;
     }
-    const account = await c.registry.get(v.key);
-    if (!account) {
+    if (v.isThisWindow) {
+      const mainLabel = c.views.find((x) => x.isMain)?.label ?? "Claude 1";
+      const pick2 = await vscode3.window.showWarningMessage(
+        `Delete "${v.label}"? This window will switch to ${mainLabel} and reload, then the account is deleted. You'll need to sign in again to use it later.`,
+        { modal: true },
+        "Delete"
+      );
+      if (pick2 !== "Delete") {
+        return;
+      }
+      const pending = { id: v.key, label: v.label };
+      await context.workspaceState.update(PENDING_REMOVE_KEY, pending);
+      await context.workspaceState.update(WINDOW_ACCOUNT_KEY, MAIN_KEY);
+      await vscode3.commands.executeCommand("workbench.action.reloadWindow");
+      return;
+    }
+    const pick = await vscode3.window.showWarningMessage(`Delete "${v.label}"? You'll need to sign in again to use it later.`, { modal: true }, "Delete");
+    if (pick !== "Delete") {
       return;
     }
     try {
-      if (process.platform === "darwin") {
-        await c.credentials.remove(c.targetFor(account.id, account.folder)).catch((e) => c.log.warn(`keychain remove: ${e?.name ?? "error"}`));
+      const r = await c.removeAccount(v.key);
+      if (r === "inUse") {
+        void vscode3.window.showWarningMessage(`Couldn't delete "${v.label}" because Claude is still using it. Close that Claude session and try again.`);
       }
-      await removeAccountFolder(c.root, account.folder);
-      await c.registry.remove(account.id);
-      await c.cache.remove(account.id);
     } catch (e) {
-      c.log.error(`remove account failed: ${e?.code ?? e?.name ?? "error"}`);
-      void vscode2.window.showErrorMessage(`Could not remove the account: ${e?.message ?? "unknown error"}`);
+      c.log.error(`delete account failed: ${e?.code ?? e?.name ?? "error"}`);
+      void vscode3.window.showErrorMessage(`Could not delete the account: ${e?.message ?? "unknown error"}`);
     }
-    await c.refresh();
+    await c.refresh(true);
   });
   reg("claudeSwap.signInAgain", async (arg) => {
     const v = viewFor(arg);
@@ -925,24 +988,24 @@ function registerCommands(context, c) {
       await switchTo(v.key, v.label);
       return;
     }
-    const pick = await vscode2.window.showInformationMessage("Type /login in the Claude panel to sign in again.", "Open Terminal");
+    const pick = await vscode3.window.showInformationMessage("Type /login in the Claude panel to sign in again.", "Open Terminal");
     if (pick) {
-      const term = vscode2.window.createTerminal({ name: "Claude sign-in" });
+      const term = vscode3.window.createTerminal({ name: "Claude sign-in" });
       term.show();
       term.sendText("claude");
     }
   });
-  reg("claudeSwap.openPanel", () => vscode2.commands.executeCommand("workbench.view.extension.claudeSwap"));
+  reg("claudeSwap.openPanel", () => vscode3.commands.executeCommand("workbench.view.extension.claudeSwap"));
 }
 
 // src/vscode/controller.ts
-var vscode3 = __toESM(require("vscode"));
+var vscode4 = __toESM(require("vscode"));
 var import_node_crypto4 = require("node:crypto");
 var path9 = __toESM(require("node:path"));
 
 // src/core/credentials.ts
 var import_node_child_process = require("node:child_process");
-var import_promises7 = require("node:fs/promises");
+var import_promises6 = require("node:fs/promises");
 var KeychainError = class extends Error {
   constructor(message) {
     super(message);
@@ -977,7 +1040,7 @@ async function readFileStore(t) {
   return readJson(credentialsPath(t.configHome));
 }
 async function removeFile(t) {
-  await (0, import_promises7.unlink)(credentialsPath(t.configHome)).catch((e) => {
+  await (0, import_promises6.unlink)(credentialsPath(t.configHome)).catch((e) => {
     if (e?.code !== "ENOENT") {
       throw e;
     }
@@ -1163,16 +1226,24 @@ async function refreshAccessToken(cred, fetchImpl = defaultFetch, now = Date.now
 }
 
 // src/core/snapshot.ts
+function nameFor(number, alias) {
+  return alias || `Claude ${number}`;
+}
 function buildSnapshot(i) {
-  const usedBy = (key) => [...new Set(i.liveWindows.filter((w) => w.accountKey === key).map((w) => w.workspaceName))];
+  const windowsFor = (key) => i.liveWindows.filter((w) => w.accountKey === key);
+  const usedBy = (key) => [...new Set(windowsFor(key).map((w) => w.workspaceName))];
+  const numbers = effectiveNumbers(i.accounts);
   const views = i.accounts.map((a) => {
+    const number = numbers.get(a.id);
     const v = {
       key: a.id,
-      label: a.alias ?? a.email ?? "New account (not signed in)",
+      number,
+      label: nameFor(number, a.alias),
       isMain: false,
       isThisWindow: i.thisWindowKey === a.id,
       signedIn: !!a.email,
-      usedBy: usedBy(a.id)
+      usedBy: usedBy(a.id),
+      openWindows: windowsFor(a.id).length
     };
     if (a.email) {
       v.email = a.email;
@@ -1187,11 +1258,13 @@ function buildSnapshot(i) {
   });
   const main = {
     key: MAIN_KEY,
-    label: "Main login",
+    number: 1,
+    label: nameFor(1, i.mainAlias),
     isMain: true,
     isThisWindow: i.thisWindowKey === MAIN_KEY,
     signedIn: !!i.mainIdentity,
-    usedBy: usedBy(MAIN_KEY)
+    usedBy: usedBy(MAIN_KEY),
+    openWindows: windowsFor(MAIN_KEY).length
   };
   if (i.mainIdentity?.email) {
     main.email = i.mainIdentity.email;
@@ -1204,6 +1277,68 @@ function buildSnapshot(i) {
   }
   views.push(main);
   return views;
+}
+
+// src/core/safeDelete.ts
+var import_promises7 = require("node:fs/promises");
+var path6 = __toESM(require("node:path"));
+async function removeLink(p) {
+  try {
+    await (0, import_promises7.unlink)(p);
+  } catch (e) {
+    if (e?.code === "EPERM" || e?.code === "EISDIR") {
+      await (0, import_promises7.rmdir)(p);
+    } else if (e?.code !== "ENOENT") {
+      throw e;
+    }
+  }
+}
+async function deleteTree(p) {
+  let st;
+  try {
+    st = await (0, import_promises7.lstat)(p);
+  } catch (e) {
+    if (e?.code === "ENOENT") {
+      return;
+    }
+    throw e;
+  }
+  if (st.isSymbolicLink()) {
+    await removeLink(p);
+    return;
+  }
+  if (st.isDirectory()) {
+    for (const name of await (0, import_promises7.readdir)(p)) {
+      await deleteTree(path6.join(p, name));
+    }
+    await (0, import_promises7.rmdir)(p);
+    return;
+  }
+  await (0, import_promises7.unlink)(p);
+}
+async function removeAccountFolder(root, folder) {
+  if (!isInside(root, folder)) {
+    throw new Error("Refusing to delete a folder outside the accounts folder");
+  }
+  await deleteTree(folder);
+}
+
+// src/core/removeAccount.ts
+async function removeAccountNow(o) {
+  const account = await o.registry.get(o.id);
+  if (!account) {
+    return "missing";
+  }
+  if (await o.inUse()) {
+    return "inUse";
+  }
+  if (o.platform === "darwin") {
+    await o.credentials.remove({ configHome: account.folder, configDirEnv: account.folder }).catch((e) => o.log?.(`keychain delete: ${e?.name ?? "error"}`));
+  }
+  await removeAccountFolder(o.root, account.folder);
+  await o.registry.remove(account.id);
+  await o.cache.remove(account.id);
+  return "removed";
 }
 
 // src/core/usage.ts
@@ -1439,7 +1574,7 @@ var AccountsController = class {
     this.credentials = createCredentialStore({ platform: process.platform });
     this.windows = new WindowRegistry(root);
   }
-  emitter = new vscode3.EventEmitter();
+  emitter = new vscode4.EventEmitter();
   onDidChange = this.emitter.event;
   views = [];
   loaded = false;
@@ -1457,7 +1592,7 @@ var AccountsController = class {
     void this.beat();
     this.beatTimer = setInterval(() => void this.beat(), HEARTBEAT_MS);
     this.restartPolling();
-    this.disposables.push(vscode3.workspace.onDidChangeConfiguration((e) => {
+    this.disposables.push(vscode4.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("claudeSwap.pollIntervalMinutes")) {
         this.restartPolling();
       }
@@ -1481,7 +1616,7 @@ var AccountsController = class {
     return this.queue;
   }
   intervalMs() {
-    const minutes = vscode3.workspace.getConfiguration("claudeSwap").get("pollIntervalMinutes") ?? 1;
+    const minutes = vscode4.workspace.getConfiguration("claudeSwap").get("pollIntervalMinutes") ?? 1;
     return Math.max(0.5, minutes) * 6e4;
   }
   restartPolling() {
@@ -1496,7 +1631,7 @@ var AccountsController = class {
       await this.windows.beat({
         windowId: this.windowId,
         accountKey: this.thisWindowKey,
-        workspaceName: vscode3.workspace.name ?? "Untitled window",
+        workspaceName: vscode4.workspace.name ?? "Untitled window",
         pid: process.pid
       });
     } catch (e) {
@@ -1517,6 +1652,7 @@ var AccountsController = class {
       }
     }
     const mainIdentity = await readIdentity(globalConfigPath(this.originalConfigDir));
+    const mainAlias = await this.registry.getMainAlias();
     const intervalMs = force ? 0 : this.intervalMs();
     const jobs = [
       ...accounts.map((a) => ({ key: a.id, target: this.targetFor(a.id, a.folder) })),
@@ -1535,7 +1671,7 @@ var AccountsController = class {
       }).catch((e) => this.log.warn(`poll ${key}: ${e?.name ?? "Error"}`))
     ));
     const usage = await this.cache.read();
-    this.views = buildSnapshot({ accounts, mainIdentity, liveWindows, usage, thisWindowKey: this.thisWindowKey });
+    this.views = buildSnapshot({ accounts, mainIdentity, mainAlias, liveWindows, usage, thisWindowKey: this.thisWindowKey });
     this.loaded = true;
     this.noticeSignIn(accounts, mainIdentity);
     this.emitter.fire(this.views);
@@ -1552,9 +1688,9 @@ var AccountsController = class {
       return;
     }
     const me = accounts.find((a) => a.id === mine.key);
-    void vscode3.window.showInformationMessage(`Signed in as ${mine.email}. Give this account a short name?`, "Rename").then((pick) => {
+    void vscode4.window.showInformationMessage(`Signed in as ${mine.email}. Give this account a short name?`, "Rename").then((pick) => {
       if (pick) {
-        void vscode3.commands.executeCommand("claudeSwap.renameAccount", mine.key);
+        void vscode4.commands.executeCommand("claudeSwap.renameAccount", mine.key);
       }
     });
     if (!me?.email) {
@@ -1562,10 +1698,24 @@ var AccountsController = class {
     }
     const same = (email, org) => email === me.email && (org ?? "") === (me.orgUuid ?? "");
     const twin = accounts.find((a) => a.id !== me.id && same(a.email, a.orgUuid));
-    const twinLabel = twin ? twin.alias ?? twin.email : same(mainIdentity?.email, mainIdentity?.orgUuid) ? "Main login" : void 0;
+    const twinLabel = twin ? this.views.find((v) => v.key === twin.id)?.label : same(mainIdentity?.email, mainIdentity?.orgUuid) ? this.views.find((v) => v.isMain)?.label : void 0;
     if (twinLabel) {
-      void vscode3.window.showWarningMessage(`"${mine.label}" is the same Claude account as "${twinLabel}". That works, but you may not need both.`);
+      void vscode4.window.showWarningMessage(`"${mine.label}" is the same Claude account as "${twinLabel}". That works, but you may not need both.`);
     }
+  }
+  /** Deletes an added account if nothing is using it (no open window, no running Claude). */
+  async removeAccount(id) {
+    const account = await this.registry.get(id);
+    return removeAccountNow({
+      root: this.root,
+      registry: this.registry,
+      cache: this.cache,
+      credentials: this.credentials,
+      platform: process.platform,
+      id,
+      inUse: async () => !!account && isAccountInUse({ accountKey: id, configHome: account.folder, liveWindows: await this.windows.live() }),
+      log: (line) => this.log.warn(line)
+    });
   }
   async shutdown() {
     this.dispose();
@@ -1587,9 +1737,12 @@ var AccountsController = class {
 };
 
 // src/vscode/statusBar.ts
-var vscode4 = __toESM(require("vscode"));
+var vscode5 = __toESM(require("vscode"));
+function icon(view) {
+  return view.isMain ? "\u{1F451}" : "$(account)";
+}
 var StatusBar = class {
-  item = vscode4.window.createStatusBarItem(vscode4.StatusBarAlignment.Left, 100);
+  item = vscode5.window.createStatusBarItem(vscode5.StatusBarAlignment.Left, 100);
   constructor() {
     this.item.command = "claudeSwap.switchAccount";
     this.item.text = "$(sync~spin) Claude: checking\u2026";
@@ -1605,9 +1758,9 @@ var StatusBar = class {
       return;
     }
     if (!view.signedIn) {
-      this.item.text = `$(account) Claude: ${view.label} | not signed in`;
-      this.item.backgroundColor = new vscode4.ThemeColor("statusBarItem.warningBackground");
-      this.item.tooltip = view.isMain ? "Your main Claude login is not signed in. Sign in from the Claude panel.\nClick to switch accounts." : "This account is not signed in yet. Sign in from the Claude panel.\nClick to switch accounts.";
+      this.item.text = `${icon(view)} ${view.label} | not signed in`;
+      this.item.backgroundColor = new vscode5.ThemeColor("statusBarItem.warningBackground");
+      this.item.tooltip = view.isMain ? "Your main account (\u{1F451}) is not signed in. Sign in from the Claude panel.\nClick to switch accounts." : "This account is not signed in yet. Sign in from the Claude panel.\nClick to switch accounts.";
       return;
     }
     const now = Date.now();
@@ -1615,7 +1768,7 @@ var StatusBar = class {
     const found = pickUsage(view.entry, now);
     let five = "N/A";
     let seven = "N/A";
-    const lines = ["Claude account for this window"];
+    const lines = [view.isMain ? "Main Claude account (\u{1F451}) for this window" : "Claude account for this window"];
     if (view.email) {
       lines.push(`Email: ${view.email}`);
     }
@@ -1640,9 +1793,9 @@ var StatusBar = class {
       }
       const level = usageLevel(u);
       if (level === "error") {
-        this.item.backgroundColor = new vscode4.ThemeColor("statusBarItem.errorBackground");
+        this.item.backgroundColor = new vscode5.ThemeColor("statusBarItem.errorBackground");
       } else if (level === "warning") {
-        this.item.backgroundColor = new vscode4.ThemeColor("statusBarItem.warningBackground");
+        this.item.backgroundColor = new vscode5.ThemeColor("statusBarItem.warningBackground");
       }
     } else if (!view.entry) {
       five = seven = "checking\u2026";
@@ -1650,10 +1803,10 @@ var StatusBar = class {
       five = seven = statusLabel(status);
     }
     if (!this.item.backgroundColor && needsAttention(status)) {
-      this.item.backgroundColor = new vscode4.ThemeColor("statusBarItem.warningBackground");
+      this.item.backgroundColor = new vscode5.ThemeColor("statusBarItem.warningBackground");
     }
     lines.push("Click to switch accounts.");
-    this.item.text = `$(account) Claude: ${view.label} | 5h: ${five} | 7d: ${seven}${found?.stale ? " $(history)" : ""}`;
+    this.item.text = `${icon(view)} ${view.label} | 5h: ${five} | 7d: ${seven}${found?.stale ? " $(history)" : ""}`;
     this.item.tooltip = lines.join("\n");
   }
   dispose() {
@@ -1662,26 +1815,14 @@ var StatusBar = class {
 };
 
 // src/vscode/windowAccount.ts
-var vscode5 = __toESM(require("vscode"));
-var import_node_fs2 = require("node:fs");
+var vscode6 = __toESM(require("vscode"));
+var import_node_fs3 = require("node:fs");
 var CLAUDE_EXTENSION_ID = "anthropic.claude-code";
 var RELOAD_PROMPT_KEY = "claudeSwap.lastReloadPrompt";
 var RELOAD_PROMPT_GAP_MS = 12e4;
 async function applyWindowAccount(context, originalConfigDir, registry, log) {
   const choice = context.workspaceState.get(WINDOW_ACCOUNT_KEY);
-  const resolved = resolveWindowEnv({ choice, accounts: await registry.list(), folderExists: import_node_fs2.existsSync, originalConfigDir });
-  if (resolved.warning) {
-    await context.workspaceState.update(WINDOW_ACCOUNT_KEY, MAIN_KEY);
-    void vscode5.window.showWarningMessage(resolved.warning);
-  }
-  if (resolved.key !== MAIN_KEY && resolved.configDir) {
-    try {
-      await syncSharedSetup({ mainHome: configHome(originalConfigDir), accountHome: resolved.configDir, platform: process.platform });
-      await syncMcpServers(globalConfigPath(originalConfigDir), globalConfigPath(resolved.configDir));
-    } catch (e) {
-      log.warn(`Could not share your Claude setup with this account: ${e?.code ?? e?.name ?? "error"}`);
-    }
-  }
+  const resolved = resolveWindowEnv({ choice, accounts: registry.listSync(), folderExists: import_node_fs3.existsSync, originalConfigDir });
   const terminalEnv = context.environmentVariableCollection;
   if (resolved.configDir) {
     process.env.CLAUDE_CONFIG_DIR = resolved.configDir;
@@ -1691,25 +1832,37 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
     terminalEnv.delete("CLAUDE_CONFIG_DIR");
   }
   terminalEnv.description = "Gives Claude in this window's terminals the same account as this window.";
-  const claudeSettings = vscode5.workspace.getConfiguration("claudeCode").get("environmentVariables");
+  if (resolved.warning) {
+    await context.workspaceState.update(WINDOW_ACCOUNT_KEY, MAIN_KEY);
+    void vscode6.window.showWarningMessage(resolved.warning);
+  }
+  if (resolved.key !== MAIN_KEY && resolved.configDir) {
+    try {
+      await syncSharedSetup({ mainHome: configHome(originalConfigDir), accountHome: resolved.configDir, platform: process.platform });
+      await syncMcpServers(globalConfigPath(originalConfigDir), globalConfigPath(resolved.configDir));
+    } catch (e) {
+      log.warn(`Could not share your Claude setup with this account: ${e?.code ?? e?.name ?? "error"}`);
+    }
+  }
+  const claudeSettings = vscode6.workspace.getConfiguration("claudeCode").get("environmentVariables");
   if (findConfigDirOverride(claudeSettings)) {
-    void vscode5.window.showWarningMessage(
+    void vscode6.window.showWarningMessage(
       "Your Claude settings set CLAUDE_CONFIG_DIR for every window, so each window can't have its own account. Remove it from claudeCode.environmentVariables.",
       "Open Settings"
     ).then((pick) => {
       if (pick) {
-        void vscode5.commands.executeCommand("workbench.action.openSettings", "claudeCode.environmentVariables");
+        void vscode6.commands.executeCommand("workbench.action.openSettings", "claudeCode.environmentVariables");
       }
     });
   }
-  const claude = vscode5.extensions.getExtension(CLAUDE_EXTENSION_ID);
+  const claude = vscode6.extensions.getExtension(CLAUDE_EXTENSION_ID);
   if (claude?.isActive && resolved.configDir !== originalConfigDir) {
     const last = context.workspaceState.get(RELOAD_PROMPT_KEY) ?? 0;
     if (Date.now() - last > RELOAD_PROMPT_GAP_MS) {
       await context.workspaceState.update(RELOAD_PROMPT_KEY, Date.now());
-      void vscode5.window.showInformationMessage("Reload this window so Claude uses this window's account.", "Reload").then((pick) => {
+      void vscode6.window.showInformationMessage("Reload this window so Claude uses this window's account.", "Reload").then((pick) => {
         if (pick) {
-          void vscode5.commands.executeCommand("workbench.action.reloadWindow");
+          void vscode6.commands.executeCommand("workbench.action.reloadWindow");
         }
       });
     }
@@ -1721,7 +1874,7 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
 var ORIGINAL_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || void 0;
 var controller;
 async function activate(context) {
-  const log = vscode6.window.createOutputChannel("Claude Swap Status", { log: true });
+  const log = vscode7.window.createOutputChannel("Claude Swap Status", { log: true });
   context.subscriptions.push(log);
   const root = accountsRoot();
   const registry = new Registry(root);
@@ -1735,11 +1888,12 @@ async function activate(context) {
     statusBar,
     panel,
     c.onDidChange((views) => statusBar.update(views)),
-    vscode6.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel),
-    vscode6.commands.registerCommand("claudeSwap.refreshStatus", () => c.refresh(true))
+    vscode7.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel),
+    vscode7.commands.registerCommand("claudeSwap.refreshStatus", () => c.refresh(true))
   );
   registerCommands(context, c);
   c.start();
+  void finishPendingRemoval(context.workspaceState, (id) => c.removeAccount(id)).then(() => c.refresh(true));
   return {
     thisWindowKey: () => c.thisWindowKey,
     views: () => c.views,

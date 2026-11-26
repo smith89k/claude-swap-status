@@ -79,3 +79,16 @@ export class FakeLog {
     error(s: string) { this.lines.push(`error ${s}`); }
     info(s: string) { this.lines.push(`info ${s}`); }
 }
+
+export enum StatusBarAlignment { Left = 1, Right = 2 }
+
+export class ThemeColor {
+    constructor(readonly id: string) {}
+}
+
+export const statusItems: { text: string; tooltip?: string; backgroundColor?: ThemeColor; command?: string }[] = [];
+(window as any).createStatusBarItem = () => {
+    const item = { text: '', tooltip: undefined as string | undefined, backgroundColor: undefined as ThemeColor | undefined, command: undefined as string | undefined, show() {}, dispose() {} };
+    statusItems.push(item);
+    return item;
+};
