@@ -34,7 +34,7 @@ __export(extension_exports, {
   deactivate: () => deactivate
 });
 module.exports = __toCommonJS(extension_exports);
-var vscode7 = __toESM(require("vscode"));
+var vscode8 = __toESM(require("vscode"));
 
 // src/core/paths.ts
 var import_node_crypto = require("node:crypto");
@@ -370,6 +370,9 @@ var Registry = class {
     });
   }
 };
+
+// src/core/types.ts
+var MAIN_KEY = "main";
 
 // src/vscode/accountsPanel.ts
 var vscode = __toESM(require("vscode"));
@@ -764,9 +767,6 @@ async function syncMcpServers(mainGlobal, accountGlobal) {
     await writeJsonAtomic(accountGlobal, account);
   });
 }
-
-// src/core/types.ts
-var MAIN_KEY = "main";
 
 // src/core/windowEnv.ts
 var WINDOW_ACCOUNT_KEY = "claudeSwap.windowAccount";
@@ -1627,12 +1627,17 @@ var AccountsController = class {
     this.pollTimer = setInterval(() => void this.refresh(), this.intervalMs());
   }
   async beat() {
+    const folders = (vscode4.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    const file = vscode4.workspace.workspaceFile;
+    const openTarget = file ? file.scheme === "file" ? file.fsPath : void 0 : folders[0];
     try {
       await this.windows.beat({
         windowId: this.windowId,
         accountKey: this.thisWindowKey,
         workspaceName: vscode4.workspace.name ?? "Untitled window",
-        pid: process.pid
+        pid: process.pid,
+        folders,
+        ...openTarget ? { openTarget } : {}
       });
     } catch (e) {
       this.log.warn(`heartbeat failed: ${e?.code ?? e?.name ?? "error"}`);
@@ -1814,15 +1819,364 @@ var StatusBar = class {
   }
 };
 
-// src/vscode/windowAccount.ts
+// src/vscode/sessions.ts
 var vscode6 = __toESM(require("vscode"));
 var import_node_fs3 = require("node:fs");
+var import_promises11 = require("node:fs/promises");
+var path12 = __toESM(require("node:path"));
+
+// src/core/jumpRequests.ts
+var import_promises9 = require("node:fs/promises");
+var path10 = __toESM(require("node:path"));
+var REQUEST_MAX_AGE_MS = 3e4;
+function requestPath(root, windowId) {
+  return path10.join(root, "requests", `${windowId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
+}
+async function writeJumpRequest(root, windowId, req) {
+  await writeJsonAtomic(requestPath(root, windowId), req);
+}
+async function takeJumpRequest(root, windowId, now, maxAgeMs = REQUEST_MAX_AGE_MS) {
+  const file = requestPath(root, windowId);
+  let req;
+  try {
+    req = await readJson(file);
+  } catch {
+    req = void 0;
+  }
+  await (0, import_promises9.unlink)(file).catch(() => void 0);
+  if (!req || typeof req.sessionId !== "string" || typeof req.pid !== "number" || typeof req.at !== "number") {
+    return void 0;
+  }
+  if (now - req.at > maxAgeMs) {
+    return void 0;
+  }
+  return req;
+}
+
+// src/core/processTree.ts
+var import_node_child_process2 = require("node:child_process");
+var defaultRunner = (cmd, args) => new Promise((resolve2, reject) => {
+  (0, import_node_child_process2.execFile)(cmd, args, { timeout: 5e3, windowsHide: true }, (err, stdout) => err ? reject(err) : resolve2(String(stdout)));
+});
+async function parentPid(pid, platform, run = defaultRunner) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return void 0;
+  }
+  let out;
+  try {
+    out = platform === "win32" ? await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").ParentProcessId`]) : await run("ps", ["-o", "ppid=", "-p", String(pid)]);
+  } catch {
+    return void 0;
+  }
+  const n = Number(out.trim());
+  return Number.isInteger(n) && n > 0 ? n : void 0;
+}
+async function ancestors(pid, levels, platform, run = defaultRunner) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set([pid]);
+  let current = pid;
+  for (let i = 0; i < levels; i++) {
+    const parent = await parentPid(current, platform, run);
+    if (parent === void 0 || seen.has(parent)) {
+      break;
+    }
+    out.push(parent);
+    seen.add(parent);
+    current = parent;
+  }
+  return out;
+}
+
+// src/core/sessions.ts
+var import_promises10 = require("node:fs/promises");
+var path11 = __toESM(require("node:path"));
+function kindOf(entrypoint) {
+  if (entrypoint === "claude-vscode") {
+    return "ide";
+  }
+  if (entrypoint === "claude-desktop") {
+    return "app";
+  }
+  return "terminal";
+}
+function statusOf(status) {
+  if (status === "waiting") {
+    return "waiting";
+  }
+  if (status === "busy" || status === "shell") {
+    return "working";
+  }
+  return "idle";
+}
+function lastSegment(p) {
+  const parts = p.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+var num = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
+async function listSessions(sources, isAlive = isPidAlive) {
+  const out = [];
+  for (const src of sources) {
+    const dir = path11.join(src.configHome, "sessions");
+    let names;
+    try {
+      names = await (0, import_promises10.readdir)(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".json")) {
+        continue;
+      }
+      let raw;
+      try {
+        raw = await readJson(path11.join(dir, name));
+      } catch {
+        continue;
+      }
+      if (!raw || typeof raw.pid !== "number" || typeof raw.sessionId !== "string" || typeof raw.cwd !== "string") {
+        continue;
+      }
+      if (!isAlive(raw.pid)) {
+        continue;
+      }
+      out.push({
+        pid: raw.pid,
+        sessionId: raw.sessionId,
+        cwd: raw.cwd,
+        name: typeof raw.name === "string" && raw.name ? raw.name : lastSegment(raw.cwd),
+        kind: kindOf(raw.entrypoint),
+        status: statusOf(raw.status),
+        since: num(raw.statusUpdatedAt) ?? num(raw.updatedAt) ?? num(raw.startedAt) ?? 0,
+        accountKey: src.accountKey
+      });
+    }
+  }
+  return out;
+}
+
+// src/core/sessionsModel.ts
+var NOTE_APP = "This session runs in the Claude app.";
+var NOTE_OUTSIDE_TERMINAL = "This session runs in a terminal outside the editor.";
+var NOTE_UNREACHABLE_WINDOW = "This session runs in a window that can't be reached. Reload that window, then try again.";
+var NAME_LIMIT = 60;
+var GROUPS = [
+  { status: "waiting", heading: "Waiting for you" },
+  { status: "working", heading: "Working" },
+  { status: "idle", heading: "Idle" }
+];
+function norm(p, platform) {
+  if (platform === "win32") {
+    return p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  }
+  return p.replace(/\/+$/, "");
+}
+function isUnder(child, folder, platform = process.platform) {
+  const c = norm(child, platform);
+  const f = norm(folder, platform);
+  const sep = platform === "win32" ? "\\" : "/";
+  return c === f || c.startsWith(f + sep);
+}
+function locate(s, liveWindows, thisWindowId, platform = process.platform) {
+  if (s.kind === "app") {
+    return { where: "app" };
+  }
+  let best;
+  for (const w of liveWindows) {
+    for (const folder of w.folders ?? []) {
+      if (isUnder(s.cwd, folder, platform) && (!best || folder.length > best.length)) {
+        best = { window: w, length: folder.length };
+      }
+    }
+  }
+  if (!best) {
+    return { where: "outside" };
+  }
+  if (best.window.windowId === thisWindowId) {
+    return { where: "thisWindow" };
+  }
+  const openTarget = best.window.openTarget ?? best.window.folders?.[0];
+  return openTarget ? { where: "otherWindow", windowId: best.window.windowId, openTarget } : { where: "outside" };
+}
+function lastSegment2(p) {
+  const parts = p.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+function cut(text) {
+  return text.length > NAME_LIMIT ? text.slice(0, NAME_LIMIT - 1) + "\u2026" : text;
+}
+function where(kind, place) {
+  const what = kind === "ide" ? "Claude tab" : "terminal";
+  switch (place.where) {
+    case "thisWindow":
+      return { whereText: `${what} \xB7 this window`, canJump: true };
+    case "otherWindow":
+      return { whereText: `${what} \xB7 other window`, canJump: true };
+    case "app":
+      return { whereText: "Claude app", canJump: false, note: NOTE_APP };
+    default:
+      return { whereText: "outside the editor", canJump: false, note: kind === "ide" ? NOTE_UNREACHABLE_WINDOW : NOTE_OUTSIDE_TERMINAL };
+  }
+}
+function toSessionsModel(sessions, liveWindows, accounts, thisWindowId, now, platform = process.platform) {
+  const groups = [];
+  for (const g of GROUPS) {
+    const rows = sessions.filter((s) => s.status === g.status).sort((a, b) => a.since - b.since).map((s) => {
+      const title = lastSegment2(s.cwd);
+      const account = accounts.find((v) => v.key === s.accountKey);
+      const w = where(s.kind, locate(s, liveWindows, thisWindowId, platform));
+      const row = {
+        sessionId: s.sessionId,
+        pid: s.pid,
+        kind: s.kind,
+        status: s.status,
+        title,
+        subtitle: s.name === title ? "" : cut(s.name),
+        accountName: account?.label ?? s.accountKey,
+        isMain: account?.isMain ?? false,
+        whereText: w.whereText,
+        ageText: formatAge(Math.max(0, Math.round((now - s.since) / 1e3))),
+        canJump: w.canJump
+      };
+      if (w.note) {
+        row.note = w.note;
+      }
+      return row;
+    });
+    if (rows.length) {
+      groups.push({ status: g.status, heading: g.heading, rows });
+    }
+  }
+  return { count: sessions.length, groups };
+}
+
+// src/vscode/sessions.ts
+var VISIBLE_POLL_MS = 3e3;
+var REQUEST_POLL_MS = 2e3;
+var TERMINAL_LEVELS = 3;
+var SessionsController = class {
+  constructor(d) {
+    this.d = d;
+    this.platform = d.platform ?? process.platform;
+    this.now = d.now ?? Date.now;
+  }
+  emitter = new vscode6.EventEmitter();
+  onDidChange = this.emitter.event;
+  model = { count: 0, groups: [] };
+  sessions = [];
+  platform;
+  now;
+  pollTimer;
+  requestTimer;
+  watcher;
+  windows = [];
+  async refresh() {
+    this.sessions = await listSessions(await this.d.sources(), this.d.isAlive ?? isPidAlive);
+    this.windows = [...await this.d.liveWindows()];
+    this.model = toSessionsModel(this.sessions, this.windows, this.d.accounts(), this.d.thisWindowId, this.now(), this.platform);
+    this.emitter.fire(this.model);
+  }
+  /** Re-read every 3 seconds while the panel is visible; stop while it is hidden. */
+  setVisible(visible) {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = void 0;
+    }
+    if (visible) {
+      void this.refresh().catch((e) => this.d.log.warn(`sessions refresh: ${e?.name ?? "error"}`));
+      this.pollTimer = setInterval(() => {
+        void this.refresh().catch((e) => this.d.log.warn(`sessions refresh: ${e?.name ?? "error"}`));
+      }, VISIBLE_POLL_MS);
+    }
+  }
+  async jump(sessionId) {
+    let s = this.sessions.find((x) => x.sessionId === sessionId);
+    if (!s) {
+      await this.refresh();
+      s = this.sessions.find((x) => x.sessionId === sessionId);
+    }
+    if (!s) {
+      return "missing";
+    }
+    const live = await this.d.liveWindows();
+    const place = locate(s, this.windows.length ? this.windows : live, this.d.thisWindowId, this.platform);
+    if (place.where === "thisWindow") {
+      await this.showHere(s.sessionId, s.pid, s.kind);
+      return "opened";
+    }
+    if (place.where === "otherWindow") {
+      if (!live.some((w) => w.windowId === place.windowId)) {
+        void vscode6.window.showInformationMessage("That window just closed.");
+        return "gone";
+      }
+      await writeJumpRequest(this.d.root, place.windowId, { sessionId: s.sessionId, pid: s.pid, kind: s.kind, at: this.now() });
+      await vscode6.commands.executeCommand("vscode.openFolder", vscode6.Uri.file(place.openTarget), { forceNewWindow: true });
+      return "forwarded";
+    }
+    const row = this.model.groups.flatMap((g) => g.rows).find((r) => r.sessionId === sessionId) ?? toSessionsModel([s], live, this.d.accounts(), this.d.thisWindowId, this.now(), this.platform).groups[0]?.rows[0];
+    if (row?.note) {
+      void vscode6.window.showInformationMessage(row.note);
+    }
+    return "noted";
+  }
+  /** Picks up a request another window left for this one, and acts on it. */
+  async handleRequest() {
+    const req = await takeJumpRequest(this.d.root, this.d.thisWindowId, this.now());
+    if (req) {
+      await this.showHere(req.sessionId, req.pid, req.kind);
+    }
+  }
+  startWatching() {
+    const dir = path12.join(this.d.root, "requests");
+    void (0, import_promises11.mkdir)(dir, { recursive: true }).then(() => {
+      try {
+        this.watcher = (0, import_node_fs3.watch)(dir, () => void this.handleRequest().catch(() => void 0));
+      } catch (e) {
+        this.d.log.warn(`request watcher: ${e?.code ?? "error"}`);
+      }
+    }).catch(() => void 0);
+    this.requestTimer = setInterval(() => void this.handleRequest().catch(() => void 0), REQUEST_POLL_MS);
+  }
+  async showHere(sessionId, pid, kind) {
+    if (kind === "ide") {
+      try {
+        await vscode6.commands.executeCommand("claude-vscode.editor.open", sessionId);
+      } catch {
+        void vscode6.window.showWarningMessage("Couldn't open that Claude session here.");
+      }
+      return;
+    }
+    if (kind === "terminal") {
+      const family = await ancestors(pid, TERMINAL_LEVELS, this.platform, this.d.run);
+      for (const t of vscode6.window.terminals) {
+        const shell = await t.processId;
+        if (shell !== void 0 && family.includes(shell)) {
+          t.show();
+          return;
+        }
+      }
+    }
+  }
+  dispose() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
+    if (this.requestTimer) {
+      clearInterval(this.requestTimer);
+    }
+    this.watcher?.close();
+    this.emitter.dispose();
+  }
+};
+
+// src/vscode/windowAccount.ts
+var vscode7 = __toESM(require("vscode"));
+var import_node_fs4 = require("node:fs");
 var CLAUDE_EXTENSION_ID = "anthropic.claude-code";
 var RELOAD_PROMPT_KEY = "claudeSwap.lastReloadPrompt";
 var RELOAD_PROMPT_GAP_MS = 12e4;
 async function applyWindowAccount(context, originalConfigDir, registry, log) {
   const choice = context.workspaceState.get(WINDOW_ACCOUNT_KEY);
-  const resolved = resolveWindowEnv({ choice, accounts: registry.listSync(), folderExists: import_node_fs3.existsSync, originalConfigDir });
+  const resolved = resolveWindowEnv({ choice, accounts: registry.listSync(), folderExists: import_node_fs4.existsSync, originalConfigDir });
   const terminalEnv = context.environmentVariableCollection;
   if (resolved.configDir) {
     process.env.CLAUDE_CONFIG_DIR = resolved.configDir;
@@ -1834,7 +2188,7 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
   terminalEnv.description = "Gives Claude in this window's terminals the same account as this window.";
   if (resolved.warning) {
     await context.workspaceState.update(WINDOW_ACCOUNT_KEY, MAIN_KEY);
-    void vscode6.window.showWarningMessage(resolved.warning);
+    void vscode7.window.showWarningMessage(resolved.warning);
   }
   if (resolved.key !== MAIN_KEY && resolved.configDir) {
     try {
@@ -1844,25 +2198,25 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
       log.warn(`Could not share your Claude setup with this account: ${e?.code ?? e?.name ?? "error"}`);
     }
   }
-  const claudeSettings = vscode6.workspace.getConfiguration("claudeCode").get("environmentVariables");
+  const claudeSettings = vscode7.workspace.getConfiguration("claudeCode").get("environmentVariables");
   if (findConfigDirOverride(claudeSettings)) {
-    void vscode6.window.showWarningMessage(
+    void vscode7.window.showWarningMessage(
       "Your Claude settings set CLAUDE_CONFIG_DIR for every window, so each window can't have its own account. Remove it from claudeCode.environmentVariables.",
       "Open Settings"
     ).then((pick) => {
       if (pick) {
-        void vscode6.commands.executeCommand("workbench.action.openSettings", "claudeCode.environmentVariables");
+        void vscode7.commands.executeCommand("workbench.action.openSettings", "claudeCode.environmentVariables");
       }
     });
   }
-  const claude = vscode6.extensions.getExtension(CLAUDE_EXTENSION_ID);
+  const claude = vscode7.extensions.getExtension(CLAUDE_EXTENSION_ID);
   if (claude?.isActive && resolved.configDir !== originalConfigDir) {
     const last = context.workspaceState.get(RELOAD_PROMPT_KEY) ?? 0;
     if (Date.now() - last > RELOAD_PROMPT_GAP_MS) {
       await context.workspaceState.update(RELOAD_PROMPT_KEY, Date.now());
-      void vscode6.window.showInformationMessage("Reload this window so Claude uses this window's account.", "Reload").then((pick) => {
+      void vscode7.window.showInformationMessage("Reload this window so Claude uses this window's account.", "Reload").then((pick) => {
         if (pick) {
-          void vscode6.commands.executeCommand("workbench.action.reloadWindow");
+          void vscode7.commands.executeCommand("workbench.action.reloadWindow");
         }
       });
     }
@@ -1874,7 +2228,7 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
 var ORIGINAL_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || void 0;
 var controller;
 async function activate(context) {
-  const log = vscode7.window.createOutputChannel("Claude Swap Status", { log: true });
+  const log = vscode8.window.createOutputChannel("Claude Swap Status", { log: true });
   context.subscriptions.push(log);
   const root = accountsRoot();
   const registry = new Registry(root);
@@ -1888,10 +2242,43 @@ async function activate(context) {
     statusBar,
     panel,
     c.onDidChange((views) => statusBar.update(views)),
-    vscode7.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel),
-    vscode7.commands.registerCommand("claudeSwap.refreshStatus", () => c.refresh(true))
+    vscode8.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel),
+    vscode8.commands.registerCommand("claudeSwap.refreshStatus", () => c.refresh(true))
   );
   registerCommands(context, c);
+  const sessions = new SessionsController({
+    root,
+    thisWindowId: c.windowId,
+    sources: async () => [
+      { accountKey: MAIN_KEY, configHome: configHome(ORIGINAL_CONFIG_DIR) },
+      ...(await registry.list()).map((a) => ({ accountKey: a.id, configHome: a.folder }))
+    ],
+    liveWindows: () => c.windows.live(),
+    accounts: () => c.views,
+    log
+  });
+  context.subscriptions.push(
+    sessions,
+    vscode8.commands.registerCommand("claudeSwap.jumpToSession", async (sessionId) => {
+      if (!sessionId) {
+        await sessions.refresh();
+        const pick = await vscode8.window.showQuickPick(
+          sessions.model.groups.flatMap((g) => g.rows.map((r) => ({
+            label: `${r.isMain ? "\u{1F451} " : ""}${r.title}`,
+            description: `${g.heading} \xB7 ${r.accountName}`,
+            detail: [r.subtitle, r.whereText].filter(Boolean).join(" \xB7 "),
+            sessionId: r.sessionId
+          }))),
+          { placeHolder: sessions.model.count ? "Jump to a running Claude session" : "No Claude sessions are running right now." }
+        );
+        sessionId = pick?.sessionId;
+      }
+      if (sessionId) {
+        await sessions.jump(sessionId);
+      }
+    })
+  );
+  sessions.startWatching();
   c.start();
   void finishPendingRemoval(context.workspaceState, (id) => c.removeAccount(id)).then(() => c.refresh(true));
   return {

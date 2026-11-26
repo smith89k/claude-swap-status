@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
-import { accountsRoot } from './core/paths';
+import { accountsRoot, configHome } from './core/paths';
 import { Registry } from './core/registry';
-import type { AccountView } from './core/types';
+import { MAIN_KEY, type AccountView } from './core/types';
 import { AccountsPanelProvider } from './vscode/accountsPanel';
 import { registerCommands } from './vscode/commands';
 import { AccountsController } from './vscode/controller';
 import { StatusBar } from './vscode/statusBar';
 import { finishPendingRemoval } from './vscode/pendingRemoval';
+import { SessionsController } from './vscode/sessions';
 import { applyWindowAccount } from './vscode/windowAccount';
 
 // What the editor was started with, before this extension changes anything.
@@ -42,6 +43,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
         vscode.commands.registerCommand('claudeSwap.refreshStatus', () => c.refresh(true)),
     );
     registerCommands(context, c);
+
+    // Sessions tab: every running Claude session on this PC, and jumping to it.
+    const sessions = new SessionsController({
+        root,
+        thisWindowId: c.windowId,
+        sources: async () => [
+            { accountKey: MAIN_KEY, configHome: configHome(ORIGINAL_CONFIG_DIR) },
+            ...(await registry.list()).map((a) => ({ accountKey: a.id, configHome: a.folder })),
+        ],
+        liveWindows: () => c.windows.live(),
+        accounts: () => c.views,
+        log,
+    });
+    context.subscriptions.push(
+        sessions,
+        vscode.commands.registerCommand('claudeSwap.jumpToSession', async (sessionId?: string) => {
+            if (!sessionId) {
+                await sessions.refresh();
+                const pick = await vscode.window.showQuickPick(
+                    sessions.model.groups.flatMap((g) => g.rows.map((r) => ({
+                        label: `${r.isMain ? '👑 ' : ''}${r.title}`,
+                        description: `${g.heading} · ${r.accountName}`,
+                        detail: [r.subtitle, r.whereText].filter(Boolean).join(' · '),
+                        sessionId: r.sessionId,
+                    }))),
+                    { placeHolder: sessions.model.count ? 'Jump to a running Claude session' : 'No Claude sessions are running right now.' },
+                );
+                sessionId = pick?.sessionId;
+            }
+            if (sessionId) {
+                await sessions.jump(sessionId);
+            }
+        }),
+    );
+    sessions.startWatching();
 
     c.start();
     // If this window was switched to Claude 1 to delete its old account, finish that now.

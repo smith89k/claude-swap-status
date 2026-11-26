@@ -68,6 +68,11 @@
         "command": "claudeSwap.openPanel",
         "title": "Open Accounts Panel",
         "category": "Claude Swap"
+      },
+      {
+        "command": "claudeSwap.jumpToSession",
+        "title": "Jump to a Claude Session",
+        "category": "Claude Swap"
       }
     ],
     "configuration": {

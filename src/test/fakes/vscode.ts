@@ -92,3 +92,28 @@ export const statusItems: { text: string; tooltip?: string; backgroundColor?: Th
     statusItems.push(item);
     return item;
 };
+
+export class Uri {
+    private constructor(readonly fsPath: string, readonly scheme: string = 'file') {}
+    static file(p: string): Uri {
+        return new Uri(p);
+    }
+}
+
+export class EventEmitter<T> {
+    private listeners: ((e: T) => void)[] = [];
+    readonly event = (fn: (e: T) => void) => {
+        this.listeners.push(fn);
+        return { dispose: () => { this.listeners = this.listeners.filter((l) => l !== fn); } };
+    };
+    fire(e: T) {
+        this.listeners.forEach((l) => l(e));
+    }
+    dispose() {
+        this.listeners = [];
+    }
+}
+
+/** Terminals a test puts in this stand-in window. */
+export const terminals: { processId: Promise<number | undefined>; show(): void }[] = [];
+Object.defineProperty(window, 'terminals', { get: () => terminals });

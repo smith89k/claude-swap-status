@@ -25,7 +25,7 @@ export class AccountsController implements vscode.Disposable {
     readonly cache: UsageCache;
     readonly credentials: CredentialStore;
     readonly windows: WindowRegistry;
-    private readonly windowId = randomUUID();
+    readonly windowId = randomUUID();
     private pollTimer: NodeJS.Timeout | undefined;
     private beatTimer: NodeJS.Timeout | undefined;
     private queue: Promise<void> = Promise.resolve();
@@ -90,12 +90,18 @@ export class AccountsController implements vscode.Disposable {
     }
 
     private async beat(): Promise<void> {
+        // Folders and the thing to open let other windows jump to sessions running here.
+        const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+        const file = vscode.workspace.workspaceFile;
+        const openTarget = file ? (file.scheme === 'file' ? file.fsPath : undefined) : folders[0];
         try {
             await this.windows.beat({
                 windowId: this.windowId,
                 accountKey: this.thisWindowKey,
                 workspaceName: vscode.workspace.name ?? 'Untitled window',
                 pid: process.pid,
+                folders,
+                ...(openTarget ? { openTarget } : {}),
             });
         } catch (e: any) {
             this.log.warn(`heartbeat failed: ${e?.code ?? e?.name ?? 'error'}`);
