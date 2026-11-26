@@ -1,4 +1,22 @@
+<div align="center">
+
+<img src="art/logo.svg" width="112" height="112" alt="Claude Swap Status logo">
+
 # Claude Swap Status
+
+**See your Claude Code usage in the status bar of Antigravity IDE or VS Code, and swap account with one click.**
+
+<a href="https://open-vsx.org/extension/smith89k/claude-swap-status"><img src="https://img.shields.io/open-vsx/v/smith89k/claude-swap-status?label=Open%20VSX&color=C6522A" alt="Open VSX"></a>
+<a href="https://marketplace.visualstudio.com/items?itemName=smith89k.claude-swap-status"><img src="https://img.shields.io/visual-studio-marketplace/v/smith89k.claude-swap-status?label=VS%20Marketplace&color=007ACC" alt="VS Marketplace"></a>
+<img src="https://img.shields.io/badge/needs-claude--swap-D97757" alt="Needs claude-swap">
+<a href="https://github.com/smith89k/claude-swap-status/blob/main/LICENSE"><img src="https://img.shields.io/github/license/smith89k/claude-swap-status" alt="Licence"></a>
+
+</div>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="art/banner-dark.png">
+  <img src="art/banner-light.png" alt="Claude Swap Status: the editor status bar showing Claude usage, with the account menu open." width="100%">
+</picture>
 
 See your Claude Code usage right in the status bar of Antigravity IDE (or VS Code), and switch between Claude accounts with one click.
 
