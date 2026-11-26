@@ -63,6 +63,11 @@ test('rows that cannot jump explain where they are', () => {
     assert.deepEqual([by.o.canJump, by.o.whereText, by.o.accountName], [true, 'terminal · other window', 'main']);
 });
 
+test('a window with no safe thing to open (unsaved multi-folder workspace) is never a jump target', () => {
+    const unsaved: WindowBeat = { windowId: 'other', accountKey: 'main', workspaceName: 'Untitled (Workspace)', pid: 1, updatedAt: 0, folders: ['C:\\p\\b', 'C:\\p\\c'] };
+    assert.deepEqual(locate(S({ cwd: 'C:\\p\\b' }), [unsaved], 'me', 'win32'), { where: 'outside' });
+});
+
 test('nothing running gives an empty model', () => {
     assert.deepEqual(toSessionsModel([], [], [], 'me', 0), { count: 0, groups: [] });
 });

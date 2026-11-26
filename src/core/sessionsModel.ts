@@ -84,7 +84,9 @@ export function locate(s: RunningSession, liveWindows: WindowBeat[], thisWindowI
     if (best.window.windowId === thisWindowId) {
         return { where: 'thisWindow' };
     }
-    const openTarget = best.window.openTarget ?? best.window.folders?.[0];
+    // Only the window's own openTarget is safe to open: falling back to one of its folders
+    // would open a NEW window for an unsaved multi-folder workspace.
+    const openTarget = best.window.openTarget;
     return openTarget ? { where: 'otherWindow', windowId: best.window.windowId, openTarget } : { where: 'outside' };
 }
 

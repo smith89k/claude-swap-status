@@ -2002,7 +2002,7 @@ function locate(s, liveWindows, thisWindowId, platform = process.platform) {
   if (best.window.windowId === thisWindowId) {
     return { where: "thisWindow" };
   }
-  const openTarget = best.window.openTarget ?? best.window.folders?.[0];
+  const openTarget = best.window.openTarget;
   return openTarget ? { where: "otherWindow", windowId: best.window.windowId, openTarget } : { where: "outside" };
 }
 function lastSegment2(p) {
