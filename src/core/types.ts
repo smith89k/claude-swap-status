@@ -69,6 +69,10 @@ export interface WindowBeat {
     workspaceName: string;
     pid: number;
     updatedAt: number;
+    /** Folders open in this window (missing in heartbeats from older versions). */
+    folders?: string[];
+    /** What to open to bring this window forward: its .code-workspace file, or its folder. */
+    openTarget?: string;
 }
 
 export interface AccountView {
