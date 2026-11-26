@@ -147,8 +147,104 @@
         return row;
     }
 
-    function render(model) {
+    // ----- Sessions tab -----
+
+    function sessionRow(r) {
+        const b = el('button', 'session' + (r.canJump ? '' : ' cannot-jump'));
+        b.type = 'button';
+        b.dataset.status = r.status;
+        b.title = r.canJump ? 'Jump to this session' : (r.note || '');
+        const top = el('span', 'session-top');
+        top.append(el('span', 'session-dot'), el('span', 'session-title', r.title));
+        const account = el('span', 'session-account');
+        if (r.isMain) {
+            const crown = el('span', 'acc-crown');
+            crown.innerHTML = CROWN;
+            crown.setAttribute('role', 'img');
+            crown.setAttribute('aria-label', 'Main account');
+            account.append(crown);
+        }
+        account.append(el('span', 'session-account-name', r.accountName));
+        top.append(account);
+        b.append(top);
+        if (r.subtitle) {
+            b.append(el('span', 'session-sub', r.subtitle));
+        }
+        b.append(el('span', 'session-meta', r.whereText + ' · ' + r.ageText));
+        b.addEventListener('click', () => vscode.postMessage({ type: 'jump', sessionId: r.sessionId }));
+        return b;
+    }
+
+    function renderSessions(sessions) {
+        if (!sessions || !sessions.count) {
+            app.append(el('p', 'intro', 'No Claude sessions are running right now.'));
+            return;
+        }
+        for (const g of sessions.groups) {
+            const section = el('section', 'sessions');
+            section.append(el('h2', '', g.heading));
+            g.rows.forEach((r) => section.append(sessionRow(r)));
+            app.append(section);
+        }
+    }
+
+    // ----- Tabs -----
+
+    let state = { model: undefined, sessions: undefined, tab: 'accounts' };
+
+    function tabBar() {
+        const bar = el('div', 'tabs');
+        bar.setAttribute('role', 'tablist');
+        const tabs = [
+            { id: 'accounts', text: 'Accounts' },
+            { id: 'sessions', text: 'Sessions', count: state.sessions ? state.sessions.count : 0 },
+        ];
+        const buttons = tabs.map((t) => {
+            const b = el('button', 'tab');
+            b.type = 'button';
+            b.id = 'tab-' + t.id;
+            b.setAttribute('role', 'tab');
+            b.setAttribute('aria-selected', String(state.tab === t.id));
+            b.tabIndex = state.tab === t.id ? 0 : -1;
+            b.append(el('span', '', t.text));
+            if (t.count) {
+                b.append(el('span', 'tab-count', String(t.count)));
+            }
+            b.addEventListener('click', () => select(t.id));
+            return b;
+        });
+        bar.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') {
+                return;
+            }
+            const next = state.tab === 'accounts' ? 'sessions' : 'accounts';
+            select(next);
+            const focus = document.getElementById('tab-' + next);
+            if (focus) {
+                focus.focus();
+            }
+        });
+        bar.append(...buttons);
+        return bar;
+    }
+
+    function select(tab) {
+        state = { ...state, tab };
+        vscode.setState(state);
+        draw();
+    }
+
+    function draw() {
         app.replaceChildren();
+        app.append(tabBar());
+        if (state.tab === 'sessions') {
+            renderSessions(state.sessions);
+        } else if (state.model) {
+            renderAccounts(state.model);
+        }
+    }
+
+    function renderAccounts(model) {
         if (model.current) {
             const section = el('section', 'current');
             section.append(el('h2', '', 'This window'), accountBlock(model.current));
@@ -174,14 +270,16 @@
     window.addEventListener('message', (event) => {
         const msg = event.data;
         if (msg && msg.type === 'state' && msg.model) {
-            vscode.setState(msg.model);
-            render(msg.model);
+            state = { ...state, model: msg.model, sessions: msg.sessions };
+            vscode.setState(state);
+            draw();
         }
     });
 
     const saved = vscode.getState();
-    if (saved) {
-        render(saved);
+    if (saved && saved.model) {
+        state = { model: saved.model, sessions: saved.sessions, tab: saved.tab === 'sessions' ? 'sessions' : 'accounts' };
+        draw();
     }
     vscode.postMessage({ type: 'ready' });
 })();

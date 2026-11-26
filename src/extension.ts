@@ -33,13 +33,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
     const c = new AccountsController(root, registry, applied.key, ORIGINAL_CONFIG_DIR, log);
     controller = c;
     const statusBar = new StatusBar();
-    const panel = new AccountsPanelProvider(context.extensionUri, c);
     context.subscriptions.push(
         c,
         statusBar,
-        panel,
         c.onDidChange((views) => statusBar.update(views)),
-        vscode.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel),
         vscode.commands.registerCommand('claudeSwap.refreshStatus', () => c.refresh(true)),
     );
     registerCommands(context, c);
@@ -78,6 +75,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
         }),
     );
     sessions.startWatching();
+
+    const panel = new AccountsPanelProvider(context.extensionUri, c, sessions);
+    context.subscriptions.push(panel, vscode.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel));
 
     c.start();
     // If this window was switched to Claude 1 to delete its old account, finish that now.

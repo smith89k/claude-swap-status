@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import { toPanelModel } from '../core/panelModel';
 import type { AccountsController } from './controller';
+import type { SessionsController } from './sessions';
 
 const ACTION_COMMANDS: Record<string, string> = {
     use: 'claudeSwap.useInThisWindow',
@@ -17,10 +18,14 @@ const ACTION_COMMANDS: Record<string, string> = {
 export class AccountsPanelProvider implements vscode.WebviewViewProvider, vscode.Disposable {
     static readonly viewType = 'claudeSwap.accounts';
     private view: vscode.WebviewView | undefined;
-    private readonly subscription: vscode.Disposable;
+    private readonly subscriptions: vscode.Disposable[];
 
-    constructor(private readonly extensionUri: vscode.Uri, private readonly controller: AccountsController) {
-        this.subscription = controller.onDidChange(() => this.post());
+    constructor(
+        private readonly extensionUri: vscode.Uri,
+        private readonly controller: AccountsController,
+        private readonly sessions: SessionsController,
+    ) {
+        this.subscriptions = [controller.onDidChange(() => this.post()), sessions.onDidChange(() => this.post())];
     }
 
     resolveWebviewView(view: vscode.WebviewView): void {
@@ -30,29 +35,37 @@ export class AccountsPanelProvider implements vscode.WebviewViewProvider, vscode
         view.webview.html = this.html(view.webview, media);
         view.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
         view.onDidChangeVisibility(() => {
+            // Running sessions are only re-read while the panel can be seen.
+            this.sessions.setVisible(view.visible);
             if (view.visible) {
                 this.post();
             }
         });
         view.onDidDispose(() => {
+            this.sessions.setVisible(false);
             this.view = undefined;
         });
+        this.sessions.setVisible(view.visible);
     }
 
     private post(): void {
         if (!this.view || !this.controller.loaded) {
             return;
         }
-        void this.view.webview.postMessage({ type: 'state', model: toPanelModel(this.controller.views, Date.now()) });
+        void this.view.webview.postMessage({ type: 'state', model: toPanelModel(this.controller.views, Date.now()), sessions: this.sessions.model });
     }
 
     private onMessage(msg: unknown): void {
         if (!msg || typeof msg !== 'object') {
             return;
         }
-        const m = msg as { type?: unknown; action?: unknown; key?: unknown };
+        const m = msg as { type?: unknown; action?: unknown; key?: unknown; sessionId?: unknown };
         if (m.type === 'ready') {
             this.post();
+            return;
+        }
+        if (m.type === 'jump' && typeof m.sessionId === 'string') {
+            void vscode.commands.executeCommand('claudeSwap.jumpToSession', m.sessionId);
             return;
         }
         if (m.type !== 'action' || typeof m.action !== 'string' || !(m.action in ACTION_COMMANDS)) {
@@ -83,6 +96,6 @@ export class AccountsPanelProvider implements vscode.WebviewViewProvider, vscode
     }
 
     dispose(): void {
-        this.subscription.dispose();
+        this.subscriptions.forEach((s) => s.dispose());
     }
 }

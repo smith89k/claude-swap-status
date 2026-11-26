@@ -590,14 +590,15 @@ var ACTION_COMMANDS = {
   refresh: "claudeSwap.refreshStatus"
 };
 var AccountsPanelProvider = class {
-  constructor(extensionUri, controller2) {
+  constructor(extensionUri, controller2, sessions) {
     this.extensionUri = extensionUri;
     this.controller = controller2;
-    this.subscription = controller2.onDidChange(() => this.post());
+    this.sessions = sessions;
+    this.subscriptions = [controller2.onDidChange(() => this.post()), sessions.onDidChange(() => this.post())];
   }
   static viewType = "claudeSwap.accounts";
   view;
-  subscription;
+  subscriptions;
   resolveWebviewView(view) {
     this.view = view;
     const media = vscode.Uri.joinPath(this.extensionUri, "media");
@@ -605,19 +606,22 @@ var AccountsPanelProvider = class {
     view.webview.html = this.html(view.webview, media);
     view.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
     view.onDidChangeVisibility(() => {
+      this.sessions.setVisible(view.visible);
       if (view.visible) {
         this.post();
       }
     });
     view.onDidDispose(() => {
+      this.sessions.setVisible(false);
       this.view = void 0;
     });
+    this.sessions.setVisible(view.visible);
   }
   post() {
     if (!this.view || !this.controller.loaded) {
       return;
     }
-    void this.view.webview.postMessage({ type: "state", model: toPanelModel(this.controller.views, Date.now()) });
+    void this.view.webview.postMessage({ type: "state", model: toPanelModel(this.controller.views, Date.now()), sessions: this.sessions.model });
   }
   onMessage(msg) {
     if (!msg || typeof msg !== "object") {
@@ -626,6 +630,10 @@ var AccountsPanelProvider = class {
     const m = msg;
     if (m.type === "ready") {
       this.post();
+      return;
+    }
+    if (m.type === "jump" && typeof m.sessionId === "string") {
+      void vscode.commands.executeCommand("claudeSwap.jumpToSession", m.sessionId);
       return;
     }
     if (m.type !== "action" || typeof m.action !== "string" || !(m.action in ACTION_COMMANDS)) {
@@ -654,7 +662,7 @@ var AccountsPanelProvider = class {
 </html>`;
   }
   dispose() {
-    this.subscription.dispose();
+    this.subscriptions.forEach((s) => s.dispose());
   }
 };
 
@@ -2236,13 +2244,10 @@ async function activate(context) {
   const c = new AccountsController(root, registry, applied.key, ORIGINAL_CONFIG_DIR, log);
   controller = c;
   const statusBar = new StatusBar();
-  const panel = new AccountsPanelProvider(context.extensionUri, c);
   context.subscriptions.push(
     c,
     statusBar,
-    panel,
     c.onDidChange((views) => statusBar.update(views)),
-    vscode8.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel),
     vscode8.commands.registerCommand("claudeSwap.refreshStatus", () => c.refresh(true))
   );
   registerCommands(context, c);
@@ -2279,6 +2284,8 @@ async function activate(context) {
     })
   );
   sessions.startWatching();
+  const panel = new AccountsPanelProvider(context.extensionUri, c, sessions);
+  context.subscriptions.push(panel, vscode8.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel));
   c.start();
   void finishPendingRemoval(context.workspaceState, (id) => c.removeAccount(id)).then(() => c.refresh(true));
   return {

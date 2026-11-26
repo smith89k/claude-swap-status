@@ -295,3 +295,128 @@ button:focus-visible {
     .account.is-current { margin: 0 6px; }
     .others { padding: 0 6px; }
 }
+
+/* ----- Tabs: Accounts | Sessions ----- */
+.tabs {
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px 0;
+    border-bottom: 1px solid var(--rule);
+}
+.tab {
+    display: inline-flex;
+    flex: 0 1 auto;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px 6px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--muted);
+    background: transparent;
+    cursor: pointer;
+}
+.tab:hover { color: var(--vscode-foreground); }
+.tab[aria-selected="true"] {
+    color: var(--vscode-foreground);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+}
+.tab-count {
+    min-width: 16px;
+    padding: 0 5px;
+    border-radius: 8px;
+    font-size: 10px;
+    line-height: 16px;
+    text-align: center;
+    color: var(--vscode-badge-foreground);
+    background: var(--vscode-badge-background);
+}
+
+/* ----- Sessions tab ----- */
+.sessions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 0 8px;
+}
+.sessions h2 { margin: 14px 6px 0; }
+
+.session {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--box);
+    border-radius: 4px;
+    font: inherit;
+    text-align: left;
+    color: var(--vscode-foreground);
+    background: transparent;
+    cursor: pointer;
+}
+.session:hover { background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent); }
+.session.cannot-jump { cursor: default; }
+body.vscode-high-contrast .session { border-color: var(--vscode-contrastBorder); }
+
+.session-top {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+.session-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+.session[data-status="waiting"] .session-dot { background: var(--fill-warning); }
+.session[data-status="working"] .session-dot { background: var(--fill-normal); }
+.session-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.session-account {
+    display: inline-flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--muted);
+}
+.session-account-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.session-sub,
+.session-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--muted);
+    padding-left: 15px;
+}
+.session-meta { font-size: 11px; }
+
+@container (max-width: 250px) {
+    .sessions { padding: 0 6px; }
+    .session { padding: 10px 10px; }
+    /* Narrow: tabs get tighter, and the account moves under the project name. */
+    .tabs { padding: 6px 4px 0; }
+    .tab { padding: 5px 6px 6px; gap: 4px; }
+    .session-top { flex-wrap: wrap; row-gap: 2px; }
+    .session-account { flex-basis: 100%; margin-left: 15px; }
+}
