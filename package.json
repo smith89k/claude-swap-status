@@ -131,11 +131,13 @@
     "watch": "npm run package -- --watch",
     "package": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
     "build": "npm run package",
-    "test": "node scripts/build-tests.mjs && node --test \"out-test/*.test.js\""
+    "test": "node scripts/build-tests.mjs && node --test \"out-test/*.test.js\"",
+    "test:launch": "npm run build && node scripts/run-launch-test.mjs"
   },
   "devDependencies": {
     "@types/node": "18.x",
     "@types/vscode": "~1.90.0",
+    "@vscode/test-electron": "^2.5.2",
     "canvas": "^3.2.3",
     "esbuild": "^0.19.11",
     "typescript": "^5.3.3"

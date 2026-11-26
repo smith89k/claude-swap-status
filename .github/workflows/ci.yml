@@ -31,3 +31,7 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      - name: Launch test in a real VS Code
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:launch

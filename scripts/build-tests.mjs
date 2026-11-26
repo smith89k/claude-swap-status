@@ -14,7 +14,8 @@ await build({
     platform: 'node',
     format: 'cjs',
     target: 'node18',
-    external: ['vscode'],
+    // Tests get a small stand-in for the editor API instead of the real one.
+    alias: { vscode: './src/test/fakes/vscode.ts' },
     sourcemap: 'inline',
     outdir: 'out-test',
     logLevel: 'warning',
