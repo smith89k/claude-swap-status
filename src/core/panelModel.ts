@@ -3,6 +3,8 @@
 import { formatAge, formatResetIn, pickUsage, usageLevel, type UsageLevel } from './format';
 import type { AccountView, UsageWindow } from './types';
 
+export const CHROME_HINT = 'Claude in Chrome works only in windows that use the same account as the Chrome extension.';
+
 const FIVE_HOURS_MS = 5 * 3_600_000;
 const SEVEN_DAYS_MS = 7 * 24 * 3_600_000;
 
@@ -38,6 +40,8 @@ export interface PanelModel {
     current?: PanelAccount;
     others: PanelAccount[];
     hasExtraAccounts: boolean;
+    /** A short note under the accounts, when there is something worth knowing. */
+    hint?: string;
 }
 
 function meter(label: '5h' | '7d', w: UsageWindow, now: number): PanelMeter {
@@ -141,9 +145,15 @@ function toAccount(v: AccountView, now: number): PanelAccount {
 
 export function toPanelModel(views: AccountView[], now: number): PanelModel {
     const accounts = views.map((v) => toAccount(v, now));
-    return {
+    const hasExtraAccounts = views.some((v) => !v.isMain);
+    const model: PanelModel = {
         current: accounts.find((a) => a.isThisWindow),
         others: accounts.filter((a) => !a.isThisWindow),
-        hasExtraAccounts: views.some((v) => !v.isMain),
+        hasExtraAccounts,
     };
+    if (hasExtraAccounts) {
+        // The Chrome extension is signed in to one account, so windows on other accounts can't use it.
+        model.hint = CHROME_HINT;
+    }
+    return model;
 }

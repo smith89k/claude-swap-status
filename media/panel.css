@@ -1,6 +1,7 @@
 /* Claude Accounts side panel. Colours and type come from the editor theme. */
 :root {
     --muted: var(--vscode-descriptionForeground);
+    --box: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
     --rule: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
     --track: color-mix(in srgb, var(--vscode-foreground) 13%, transparent);
     --fill-normal: var(--vscode-progressBar-background, #0e70c0);
@@ -37,23 +38,30 @@ p { margin: 0; }
 
 .intro { color: var(--vscode-foreground); }
 
-/* One account. The current window's account gets the accent rule. */
-.account {
-    padding: 10px 14px 12px;
-    border-top: 1px solid var(--rule);
+/* Each account sits in its own box, with the same space above and below its text.
+   The current window's box keeps the accent edge. */
+.others {
+    display: grid;
+    gap: 8px;
+    padding: 0 8px;
 }
-.others .account:first-of-type { border-top: 0; }
+.others h2 { margin: 14px 6px 0; }
+
+.account {
+    padding: 10px 12px;
+    border: 1px solid var(--box);
+    border-radius: 4px;
+}
 
 .account.is-current {
     margin: 0 8px;
-    padding: 10px 10px 12px 12px;
-    border: 0;
-    border-left: 2px solid var(--accent);
-    border-radius: 0 3px 3px 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    border-left: 3px solid var(--accent);
     background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
+body.vscode-high-contrast .account { border-color: var(--vscode-contrastBorder); }
 body.vscode-high-contrast .account.is-current {
-    border: 1px solid var(--vscode-contrastActiveBorder, var(--accent));
+    border-color: var(--vscode-contrastActiveBorder, var(--accent));
     border-left-width: 3px;
 }
 
@@ -230,6 +238,12 @@ body.vscode-high-contrast .meter-bar { outline: 1px solid var(--vscode-contrastB
     margin: 14px 14px 0;
 }
 .add-row .btn { width: 100%; padding: 4px 11px; }
+
+.hint {
+    margin: 10px 14px 0;
+    font-size: 12px;
+    color: var(--muted);
+}
 
 button:focus-visible {
     outline: 1px solid var(--accent);

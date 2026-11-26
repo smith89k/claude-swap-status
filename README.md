@@ -108,6 +108,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 ## Good to know
 
 - **Windows only:** your `settings.json`, `CLAUDE.md` and `keybindings.json` are copied into each account's folder when a window opens. Make changes to them in a Main login window; a change made in an account window is replaced the next time it opens. On macOS and Linux they are shared directly.
+- **Claude in Chrome** works only in windows that use the same claude.ai account as the Chrome extension. Your Chrome extension is usually signed in to your Main login, so windows on other accounts can't use Chrome tools. To use Chrome with another account, sign the Chrome extension in to that account, then type `/chrome` in Claude in that window to turn it on. Windows on your Main login lose Chrome until you sign the extension back in.
 - **Removing an account** deletes only that account's folder in `~/.claude-accounts`. Your shared chat history, memory and settings stay where they are.
 - **Usage numbers** come from an unofficial Claude endpoint, so they could stop working if Anthropic changes it.
 - **Logins are kept fresh safely.** Claude renews the login of any account that is in use. The extension only renews a login when no window and no Claude session is using that account, so nobody gets signed out.

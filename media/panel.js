@@ -144,6 +144,9 @@
         } else {
             app.append(addButton(false));
         }
+        if (model.hint) {
+            app.append(el('p', 'hint', model.hint));
+        }
     }
 
     window.addEventListener('message', (event) => {

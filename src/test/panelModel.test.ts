@@ -22,6 +22,13 @@ test('this window comes first as current, the rest are others in order', () => {
     assert.equal(m.hasExtraAccounts, true);
 });
 
+test('the Claude in Chrome hint shows only once there are extra accounts', () => {
+    const only = toPanelModel([view({ key: 'main', label: 'Main login', isMain: true, isThisWindow: true })], NOW);
+    assert.equal(only.hint, undefined);
+    const more = toPanelModel([view({ key: 'a1' }), view({ key: 'main', label: 'Main login', isMain: true, isThisWindow: true })], NOW);
+    assert.equal(more.hint, 'Claude in Chrome works only in windows that use the same account as the Chrome extension.');
+});
+
 test('hasExtraAccounts is false with only the main login', () => {
     const m = toPanelModel([view({ key: 'main', label: 'Main login', isMain: true, isThisWindow: true })], NOW);
     assert.equal(m.hasExtraAccounts, false);

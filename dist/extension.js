@@ -408,6 +408,7 @@ function ageOf(at, now) {
 }
 
 // src/core/panelModel.ts
+var CHROME_HINT = "Claude in Chrome works only in windows that use the same account as the Chrome extension.";
 var FIVE_HOURS_MS = 5 * 36e5;
 var SEVEN_DAYS_MS = 7 * 24 * 36e5;
 function meter(label, w, now) {
@@ -503,11 +504,16 @@ function toAccount(v, now) {
 }
 function toPanelModel(views, now) {
   const accounts = views.map((v) => toAccount(v, now));
-  return {
+  const hasExtraAccounts = views.some((v) => !v.isMain);
+  const model = {
     current: accounts.find((a) => a.isThisWindow),
     others: accounts.filter((a) => !a.isThisWindow),
-    hasExtraAccounts: views.some((v) => !v.isMain)
+    hasExtraAccounts
   };
+  if (hasExtraAccounts) {
+    model.hint = CHROME_HINT;
+  }
+  return model;
 }
 
 // src/vscode/accountsPanel.ts
