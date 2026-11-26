@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install Dependencies
+        # --ignore-scripts: skips building "canvas", which only convert.js (icon tool) needs
+        run: npm ci --ignore-scripts
+
+      - name: Type check
+        run: npx tsc -p ./ --noEmit
+
+      - name: Unit tests
+        run: npm test
