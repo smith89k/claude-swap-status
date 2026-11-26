@@ -24,15 +24,50 @@
     "commands": [
       {
         "command": "claudeSwap.switchAccount",
-        "title": "Claude Swap: Switch Account"
+        "title": "Switch Account",
+        "category": "Claude Swap"
       },
       {
         "command": "claudeSwap.addAccount",
-        "title": "Claude Swap: Add Account"
+        "title": "Add Account",
+        "category": "Claude Swap",
+        "icon": "$(add)"
       },
       {
         "command": "claudeSwap.refreshStatus",
-        "title": "Claude Swap: Refresh Usage"
+        "title": "Refresh Usage",
+        "category": "Claude Swap",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeSwap.useInThisWindow",
+        "title": "Use Account in This Window",
+        "category": "Claude Swap"
+      },
+      {
+        "command": "claudeSwap.useMainLogin",
+        "title": "Use Main Login in This Window",
+        "category": "Claude Swap"
+      },
+      {
+        "command": "claudeSwap.renameAccount",
+        "title": "Rename Account",
+        "category": "Claude Swap"
+      },
+      {
+        "command": "claudeSwap.removeAccount",
+        "title": "Remove Account",
+        "category": "Claude Swap"
+      },
+      {
+        "command": "claudeSwap.signInAgain",
+        "title": "Sign In Again",
+        "category": "Claude Swap"
+      },
+      {
+        "command": "claudeSwap.openPanel",
+        "title": "Open Accounts Panel",
+        "category": "Claude Swap"
       }
     ],
     "configuration": {
@@ -50,6 +85,44 @@
           "description": "Ask before reloading a window to switch its Claude account."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeSwap",
+          "title": "Claude Accounts",
+          "icon": "media/accounts.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeSwap": [
+        {
+          "type": "webview",
+          "id": "claudeSwap.accounts",
+          "name": "Accounts"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeSwap.addAccount",
+          "when": "view == claudeSwap.accounts",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeSwap.refreshStatus",
+          "when": "view == claudeSwap.accounts",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeSwap.signInAgain",
+          "when": "false"
+        }
+      ]
     }
   },
   "scripts": {

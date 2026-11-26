@@ -1,0 +1,237 @@
+/* Claude Accounts side panel. Colours and type come from the editor theme. */
+:root {
+    --muted: var(--vscode-descriptionForeground);
+    --rule: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+    --track: color-mix(in srgb, var(--vscode-foreground) 13%, transparent);
+    --fill-normal: var(--vscode-progressBar-background, #0e70c0);
+    --fill-warning: var(--vscode-editorWarning-foreground, #cca700);
+    --fill-error: var(--vscode-editorError-foreground, #f14c4c);
+    --accent: var(--vscode-focusBorder, #007fd4);
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 0 0 16px;
+    color: var(--vscode-foreground);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size, 13px);
+    line-height: 1.4;
+}
+
+h2 {
+    margin: 14px 14px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--muted);
+}
+
+p { margin: 0; }
+
+.loading, .intro {
+    margin: 14px;
+    color: var(--muted);
+}
+
+.intro { color: var(--vscode-foreground); }
+
+/* One account. The current window's account gets the accent rule. */
+.account {
+    padding: 10px 14px 12px;
+    border-top: 1px solid var(--rule);
+}
+.others .account:first-of-type { border-top: 0; }
+
+.account.is-current {
+    margin: 0 8px;
+    padding: 10px 10px 12px 12px;
+    border: 0;
+    border-left: 2px solid var(--accent);
+    border-radius: 0 3px 3px 0;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+body.vscode-high-contrast .account.is-current {
+    border: 1px solid var(--vscode-contrastActiveBorder, var(--accent));
+    border-left-width: 3px;
+}
+
+.acc-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 22px;
+}
+
+.acc-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.is-current .acc-name { font-size: 1.08em; }
+
+.acc-plan {
+    flex: none;
+    padding: 0 5px;
+    border-radius: 2px;
+    font-size: 10px;
+    line-height: 16px;
+    color: var(--vscode-badge-foreground);
+    background: var(--vscode-badge-background);
+}
+
+.acc-tools {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+    opacity: 0;
+    transition: opacity 0.12s;
+}
+.account:hover .acc-tools,
+.account:focus-within .acc-tools { opacity: 1; }
+@media (hover: none) { .acc-tools { opacity: 1; } }
+
+.icon-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    color: var(--vscode-icon-foreground, var(--vscode-foreground));
+    background: transparent;
+    cursor: pointer;
+}
+.icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, var(--rule)); }
+.icon-btn svg { width: 16px; height: 16px; }
+
+.acc-email {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* Usage meters: label | segmented bar | percent | time to reset */
+.meters {
+    display: grid;
+    gap: 5px;
+    margin-top: 9px;
+}
+
+.meter {
+    display: grid;
+    grid-template-columns: 1.9em 1fr 3.2em 3.6em;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.meter-label { color: var(--muted); }
+.meter-value { text-align: right; }
+.meter-reset { color: var(--muted); white-space: nowrap; }
+
+.meter-track {
+    position: relative;
+    height: 8px;
+}
+
+.meter-bar {
+    position: absolute;
+    inset: 0;
+    border-radius: 1px;
+    background: var(--track);
+    overflow: hidden;
+    /* 20 segments, so each one is 5% of the limit. */
+    -webkit-mask: repeating-linear-gradient(90deg, #000 0 calc(5% - 1.5px), transparent calc(5% - 1.5px) 5%);
+    mask: repeating-linear-gradient(90deg, #000 0 calc(5% - 1.5px), transparent calc(5% - 1.5px) 5%);
+}
+body.vscode-high-contrast .meter-bar { outline: 1px solid var(--vscode-contrastBorder); -webkit-mask: none; mask: none; }
+
+.meter-fill {
+    display: block;
+    height: 100%;
+    width: var(--pct, 0%);
+    background: var(--fill-normal);
+}
+.meter[data-level="warning"] .meter-fill { background: var(--fill-warning); }
+.meter[data-level="error"] .meter-fill { background: var(--fill-error); }
+.meter[data-level="warning"] .meter-value { color: var(--fill-warning); }
+.meter[data-level="error"] .meter-value { color: var(--fill-error); font-weight: 600; }
+
+/* The tick shows how much of the time window has passed. Fill ahead of the tick means
+   the limit is being used faster than time is passing. */
+.meter-pace {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    left: var(--pace, 0%);
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: var(--vscode-foreground);
+    opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .meter-fill { transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1); }
+}
+
+.account[data-state="stale"] .meters { opacity: 0.55; }
+
+.acc-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+}
+.account[data-state="notSignedIn"] .acc-note,
+.account[data-state="relogin"] .acc-note,
+.account[data-state="problem"] .acc-note { color: var(--vscode-editorWarning-foreground, var(--muted)); }
+
+.acc-detail {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.btn {
+    padding: 3px 11px;
+    border: 1px solid var(--vscode-button-border, transparent);
+    border-radius: 2px;
+    font: inherit;
+    font-size: 12px;
+    line-height: 18px;
+    cursor: pointer;
+}
+.btn-small {
+    flex: none;
+    padding: 1px 9px;
+    line-height: 17px;
+}
+.acc-tools + .btn-small { margin-left: 2px; }
+.btn-primary {
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-button-background);
+}
+.btn-primary:hover { background: var(--vscode-button-hoverBackground); }
+.btn-secondary {
+    color: var(--vscode-button-secondaryForeground);
+    background: var(--vscode-button-secondaryBackground);
+}
+.btn-secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+
+.add-row {
+    margin: 14px 14px 0;
+}
+.add-row .btn { width: 100%; padding: 4px 11px; }
+
+button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
