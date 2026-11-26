@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="art/logo.svg" width="112" height="112" alt="Claude Swap Status logo">
+<img src="icon.svg" width="112" height="112" alt="Claude Swap Status logo">
 
 # Claude Swap Status
 
