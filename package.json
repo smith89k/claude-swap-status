@@ -11,13 +11,13 @@
     "url": "https://github.com/smith89k/claude-swap-status.git"
   },
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "*"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -42,12 +42,12 @@
           "type": "number",
           "default": 1,
           "minimum": 0.5,
-          "description": "How often to poll cswap for usage status (in minutes). Minimum 0.5."
+          "description": "How often to check usage, in minutes. Minimum 0.5."
         },
-        "claudeSwap.cswapExecutablePath": {
-          "type": "string",
-          "default": "cswap",
-          "description": "Path to the cswap CLI executable if it is not in your PATH."
+        "claudeSwap.confirmBeforeReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask before reloading a window to switch its Claude account."
         }
       }
     }
@@ -62,7 +62,7 @@
   },
   "devDependencies": {
     "@types/node": "18.x",
-    "@types/vscode": "^1.80.0",
+    "@types/vscode": "~1.90.0",
     "canvas": "^3.2.3",
     "esbuild": "^0.19.11",
     "typescript": "^5.3.3"
