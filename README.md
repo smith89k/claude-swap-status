@@ -68,6 +68,18 @@ Switching reloads the window, so let Claude finish what it is doing first.
 - Deleting the account this window uses switches the window to your main account and reloads it first, then deletes the account.
 - The panel fits any sidebar width. On a narrow sidebar the buttons move under the name and the reset times move into the tooltip.
 
+## The Sessions tab
+
+The side panel has two tabs: **Accounts** and **Sessions**. The Sessions tab lists every Claude session running on this PC, from every account, in your editor windows, in terminals, and in the Claude app.
+
+- Sessions are grouped as **Waiting for you**, **Working** and **Idle**, with the ones waiting for you at the top.
+- Each row shows the project, the session's name, its account (👑 for the main account), where it runs, and for how long.
+- **Click a row to jump to it:**
+  - In this window, its Claude tab opens.
+  - In another window, that window comes to the front and shows the chat, or the terminal it runs in.
+  - In the Claude app or a terminal outside the editor, the row only tells you where it is. The extension never opens a new window to get there.
+- The list updates every few seconds while the side panel is open.
+
 ## The status bar
 
 ```text
@@ -102,6 +114,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 | `Claude Swap: Delete Account`                 | Delete an account you no longer use.                      |
 | `Claude Swap: Refresh Usage`                  | Update the usage numbers right now.                       |
 | `Claude Swap: Open Accounts Panel`            | Show the side panel.                                      |
+| `Claude Swap: Jump to a Claude Session`       | Pick a running Claude session and jump to it.             |
 
 ## Settings
 
@@ -118,6 +131,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 - **Usage numbers** come from an unofficial Claude endpoint, so they could stop working if Anthropic changes it.
 - **Logins are kept fresh safely.** Claude renews the login of any account that is in use. The extension only renews a login when no window and no Claude session is using that account, so nobody gets signed out.
 - **Remote windows** (SSH, WSL, dev containers) are not supported yet.
+- **Jumping to another window** needs that window to run this version of the extension. If a session shows "outside the editor" but is open in a window, reload that window once.
 
 ## Upgrading from 0.2.x
 
