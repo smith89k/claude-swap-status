@@ -75,6 +75,8 @@ export interface WindowBeat {
     folders?: string[];
     /** What to open to bring this window forward: its .code-workspace file, or its folder. */
     openTarget?: string;
+    /** Handoff protocol version this window handles (Claude Away). Missing in older versions. */
+    handoff?: number;
 }
 
 export interface AccountView {
