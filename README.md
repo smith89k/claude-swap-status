@@ -21,6 +21,8 @@ Open two or three Antigravity IDE (or VS Code) windows, and let each one use a d
 
 It works on its own. Nothing else needs to be installed.
 
+**New in 1.0:** a standalone rewrite (no claude-swap needed), the **Claude Accounts** side panel, a **Sessions** tab that finds every Claude session and reopens finished ones, icons for your accounts, and a new logo. See [Upgrading from 0.2.x](#upgrading-from-02x).
+
 > **Unofficial.** This extension is not made by or affiliated with Anthropic. "Claude" is a trademark of Anthropic.
 
 ## Install
@@ -64,7 +66,8 @@ Switching reloads the window, so let Claude finish what it is doing first.
 - **This window** shows the account this window uses, with its 5-hour and weekly meters.
 - The small tick on each meter shows how much of that time window has already passed. If the bar reaches past the tick, you are using that limit faster than time is passing.
 - **Other accounts** shows every other account, its usage, and which windows it is open in. Click **Use here** to switch this window to it.
-- Hover an account to rename or delete it.
+- Hover an account to change its icon (the star button), rename it or delete it.
+- The button at the right end of the tab row (a window with a round arrow) reloads this window. It asks first, like switching accounts does. The round arrow in the panel's title bar only refreshes the numbers and session lists.
 - The main account 👑 can be renamed but not deleted, because its folder is Claude's own (your settings and chat history live there). Its delete icon is greyed out.
 - Deleting the account this window uses switches the window to your main account and reloads it first, then deletes the account.
 - The panel fits any sidebar width. On a narrow sidebar the buttons move under the name and the reset times move into the tooltip.
@@ -147,7 +150,9 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 
 ## Upgrading from 0.2.x
 
-This version no longer uses claude-swap, so your accounts saved in claude-swap are not imported. Add each account once with **Add account** and sign in. The `claudeSwap.cswapExecutablePath` setting is gone.
+Version 1.0 no longer uses claude-swap, so your accounts saved in claude-swap are not imported. Add each account once with **Add account** and sign in. The `claudeSwap.cswapExecutablePath` setting is gone.
+
+The old claude-swap version stays available: its last release is [v0.2.2](https://github.com/smith89k/claude-swap-status/releases/tag/v0.2.2), and its code is on the [`legacy-0.2`](https://github.com/smith89k/claude-swap-status/tree/legacy-0.2) branch.
 
 ## Troubleshooting
 
