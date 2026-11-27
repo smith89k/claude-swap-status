@@ -93,6 +93,18 @@ A switch at the top of the Sessions tab picks what to show:
 - **Click a finished session to reopen it** in a Claude tab in this window. This works when the session was made in this window's folder with this window's account. Otherwise, the row tells you what to do: switch the window's account, open that folder, or reopen it in the Claude app.
 - The panel remembers your choice. Finished sessions are only read, never changed.
 
+## Works with Claude Away
+
+Claude Away is a separate tray app that lets you answer Claude from your phone while you're away. When it takes a conversation over, and when it hands it back, this extension looks after the Claude tab in VS Code:
+
+- **Take over:** the conversation's Claude tab closes neatly, as if you closed it yourself, instead of showing "Claude Code process exited with code 1".
+- **Hand back** (you turn Away off): the conversation opens again in a fresh Claude tab, with everything you sent from the phone in it, ready to type in.
+- **It never closes a tab while Claude is working in it**, and it never opens a second copy of a conversation. If the conversation was already reopened, it leaves it alone.
+- **The window holding the conversation's folder does it**, for the account the conversation belongs to. If no window has that folder open when Claude Away hands it back, the conversation opens when you open that folder within 5 minutes.
+- If the conversation is in the Claude sidebar instead of a tab, take over works the old way.
+
+Claude Away leaves small request files in `~/.claude-accounts/handoff/`, and this extension removes them once they're handled or too old.
+
 ## The status bar
 
 ```text
