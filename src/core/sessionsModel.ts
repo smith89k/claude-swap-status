@@ -228,7 +228,18 @@ export function canReopen(p: PastSession, accountName: string, ctx: PastContext)
 
 export function toPastGroups(past: PastSession[], ctx: PastContext): SessionGroup[] {
     const buckets: SessionRow[][] = DAY_GROUPS.map(() => []);
-    const sorted = past.filter((p) => !ctx.runningIds.has(p.sessionId)).sort((a, b) => b.lastActive - a.lastActive);
+    // Accounts can share one history folder (linked on Windows too), so the same conversation is
+    // read once per account. Keep one copy: this window's account if it is among them, so it can
+    // reopen here; otherwise the first account in the list (the main one).
+    const rank = (key: string) => (key === ctx.thisAccountKey ? -1 : ctx.accounts.findIndex((v) => v.key === key) >>> 0);
+    const once = new Map<string, PastSession>();
+    for (const p of past) {
+        const kept = once.get(p.sessionId);
+        if (!kept || rank(p.accountKey) < rank(kept.accountKey)) {
+            once.set(p.sessionId, p);
+        }
+    }
+    const sorted = [...once.values()].filter((p) => !ctx.runningIds.has(p.sessionId)).sort((a, b) => b.lastActive - a.lastActive);
     for (const p of sorted) {
         const account = ctx.accounts.find((v) => v.key === p.accountKey);
         const accountName = account?.label ?? p.accountKey;

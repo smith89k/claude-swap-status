@@ -126,6 +126,15 @@ test("a finished session can only reopen here with this window's account and fol
     assert.ok([by.app, by.acc, by.sub].every((r) => !r.canJump));
 });
 
+test('a conversation in a history folder shared by several accounts is listed once, as this window\'s account when it is one of them', () => {
+    const twice = [P({ sessionId: 'x', accountKey: 'main', lastActive: 2 }), P({ sessionId: 'x', accountKey: 'a1', lastActive: 2 }), P({ sessionId: 'y', lastActive: 1 })];
+    const here = toPastGroups(twice, ctx(10, { thisAccountKey: 'a1' })).flatMap((g) => g.rows);
+    assert.deepEqual(here.map((r) => [r.sessionId, r.accountName]), [['x', 'work'], ['y', 'personal']]);
+    assert.equal(here[0].canJump, true, 'it reopens here');
+    const other = toPastGroups(twice, ctx(10, { thisAccountKey: 'a9' })).flatMap((g) => g.rows);
+    assert.deepEqual(other.map((r) => [r.sessionId, r.accountName]), [['x', 'personal'], ['y', 'personal']], 'otherwise the first account in the list');
+});
+
 test('session rows carry an added account\'s icon, never the main account\'s', () => {
     const accounts = [{ key: 'main', label: 'personal', isMain: true, icon: 'star' } as any, { key: 'a1', label: 'work', isMain: false, icon: 'gem' } as any];
     const m = toSessionsModel([S({ sessionId: 'x1', accountKey: 'a1' }), S({ sessionId: 'x2', accountKey: 'main' })], [], accounts, 'me', 0, 'win32');

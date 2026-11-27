@@ -2336,7 +2336,15 @@ function canReopen(p, accountName, ctx) {
 }
 function toPastGroups(past, ctx) {
   const buckets = DAY_GROUPS.map(() => []);
-  const sorted = past.filter((p) => !ctx.runningIds.has(p.sessionId)).sort((a, b) => b.lastActive - a.lastActive);
+  const rank = (key) => key === ctx.thisAccountKey ? -1 : ctx.accounts.findIndex((v) => v.key === key) >>> 0;
+  const once = /* @__PURE__ */ new Map();
+  for (const p of past) {
+    const kept = once.get(p.sessionId);
+    if (!kept || rank(p.accountKey) < rank(kept.accountKey)) {
+      once.set(p.sessionId, p);
+    }
+  }
+  const sorted = [...once.values()].filter((p) => !ctx.runningIds.has(p.sessionId)).sort((a, b) => b.lastActive - a.lastActive);
   for (const p of sorted) {
     const account = ctx.accounts.find((v) => v.key === p.accountKey);
     const accountName = account?.label ?? p.accountKey;
