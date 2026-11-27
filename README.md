@@ -14,7 +14,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="art/banner-dark.png">
-  <img src="art/banner-light.png" alt="Claude Swap Status: the editor status bar showing Claude usage, with the account menu open." width="100%">
+  <img src="art/banner-light.png" alt="Claude Swap Status 1.0: the Claude Accounts panel on the Sessions tab with All selected, a usage card for this window's account, and the status bar showing the crown and usage." width="100%">
 </picture>
 
 Open two or three Antigravity IDE (or VS Code) windows, and let each one use a different Claude account. The status bar shows how much of your limits the window's account has used, and a side panel lets you add accounts and switch any window with one click.
