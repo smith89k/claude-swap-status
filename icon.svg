@@ -1,5 +1,25 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="256" height="256" rx="64" fill="#D97757"/>
-<path d="M184 104L144 64V92H72V116H144V144L184 104Z" fill="white"/>
-<path d="M72 152L112 192V164H184V140H112V112L72 152Z" fill="white"/>
+<defs>
+<linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2B3040"/><stop offset="1" stop-color="#141821"/></linearGradient>
+<linearGradient id="track" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E88B6C"/><stop offset="1" stop-color="#C85E3C"/></linearGradient>
+<linearGradient id="knob" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F3E6D8"/></linearGradient>
+<linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F6C453"/><stop offset="1" stop-color="#D9932B"/></linearGradient>
+<filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#000000" flood-opacity="0.35"/></filter>
+</defs>
+<!-- Dark tile with a faint edge -->
+<rect width="256" height="256" rx="60" fill="url(#tile)"/>
+<rect x="1.5" y="1.5" width="253" height="253" rx="58.5" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="3"/>
+<!-- The switch: an orange track, switched on -->
+<rect x="30" y="80" width="196" height="96" rx="48" fill="url(#track)" filter="url(#shadow)"/>
+<rect x="30" y="80" width="196" height="96" rx="48" stroke="#000000" stroke-opacity="0.12" stroke-width="2"/>
+<circle cx="80" cy="128" r="11" fill="#A84A2B" fill-opacity="0.7"/>
+<!-- The knob wears the crown of the main account -->
+<circle cx="176" cy="128" r="40" fill="url(#knob)" filter="url(#shadow)"/>
+<g transform="translate(148 101) scale(0.56)" fill="url(#gold)" stroke="url(#gold)">
+<path d="M16 72 L9 34 L33 53 L50 24 L67 53 L91 34 L84 72 Z" stroke-linejoin="round" stroke-width="7"/>
+<rect x="15" y="78" width="70" height="11" rx="5.5" stroke-width="0"/>
+<circle cx="9" cy="31" r="7" stroke-width="0"/>
+<circle cx="50" cy="19" r="7.5" stroke-width="0"/>
+<circle cx="91" cy="31" r="7" stroke-width="0"/>
+</g>
 </svg>
