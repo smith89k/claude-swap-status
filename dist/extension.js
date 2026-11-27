@@ -34,32 +34,202 @@ __export(extension_exports, {
   deactivate: () => deactivate
 });
 module.exports = __toCommonJS(extension_exports);
-var vscode8 = __toESM(require("vscode"));
+var vscode9 = __toESM(require("vscode"));
+
+// src/core/pastSessions.ts
+var import_promises = require("node:fs/promises");
+var path = __toESM(require("node:path"));
+var PAST_DAYS = 30;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var HEAD_BYTES = 64 * 1024;
+var TAIL_BYTES = 128 * 1024;
+var PROMPT_LIMIT = 60;
+function lines(text, dropFirst, dropLast) {
+  const parts = text.split("\n");
+  if (dropFirst) {
+    parts.shift();
+  }
+  if (dropLast) {
+    parts.pop();
+  }
+  const out = [];
+  for (const line of parts) {
+    if (!line.trim()) {
+      continue;
+    }
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+    }
+  }
+  return out;
+}
+function promptText(entry) {
+  if (entry?.type !== "user" || entry.isMeta || entry.isSidechain) {
+    return void 0;
+  }
+  const content = entry.message?.content;
+  let text;
+  if (typeof content === "string") {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content.find((p) => p?.type === "text" && typeof p.text === "string")?.text;
+  }
+  const first = text?.trim().split(/\r?\n/)[0]?.trim();
+  if (!first || first.startsWith("<")) {
+    return void 0;
+  }
+  return first.length > PROMPT_LIMIT ? first.slice(0, PROMPT_LIMIT - 1) + "\u2026" : first;
+}
+function parseTranscript(head, tail, headIsWhole, tailIsWhole) {
+  const info = {};
+  for (const e of lines(head, false, !headIsWhole)) {
+    if (!info.cwd && typeof e?.cwd === "string" && e.cwd) {
+      info.cwd = e.cwd;
+    }
+    if (!info.entrypoint && typeof e?.entrypoint === "string") {
+      info.entrypoint = e.entrypoint;
+    }
+    if (!info.firstPrompt) {
+      info.firstPrompt = promptText(e);
+    }
+    if (e?.type === "custom-title" && typeof e.customTitle === "string" && e.customTitle) {
+      info.customTitle = e.customTitle;
+    }
+    if (e?.type === "ai-title" && typeof e.aiTitle === "string" && e.aiTitle) {
+      info.aiTitle = e.aiTitle;
+    }
+  }
+  for (const e of lines(tail, !tailIsWhole, false)) {
+    if (e?.type === "custom-title" && typeof e.customTitle === "string" && e.customTitle) {
+      info.customTitle = e.customTitle;
+    }
+    if (e?.type === "ai-title" && typeof e.aiTitle === "string" && e.aiTitle) {
+      info.aiTitle = e.aiTitle;
+    }
+  }
+  return info;
+}
+function lastSegment(p) {
+  const parts = p.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+function kindOf(entrypoint) {
+  if (entrypoint === "claude-vscode") {
+    return "ide";
+  }
+  if (entrypoint === "claude-desktop") {
+    return "app";
+  }
+  return "terminal";
+}
+async function readEnds(file, size) {
+  const fh = await (0, import_promises.open)(file, "r");
+  try {
+    const headLen = Math.min(size, HEAD_BYTES);
+    const head = Buffer.alloc(headLen);
+    await fh.read(head, 0, headLen, 0);
+    if (size <= HEAD_BYTES) {
+      const text = head.toString("utf8");
+      return { head: text, tail: "", headIsWhole: true, tailIsWhole: true };
+    }
+    const tailLen = Math.min(size, TAIL_BYTES);
+    const tail = Buffer.alloc(tailLen);
+    await fh.read(tail, 0, tailLen, size - tailLen);
+    return { head: head.toString("utf8"), tail: tail.toString("utf8"), headIsWhole: false, tailIsWhole: tailLen === size };
+  } finally {
+    await fh.close();
+  }
+}
+var PastSessionReader = class {
+  cache = /* @__PURE__ */ new Map();
+  /** How many transcripts were actually opened on the last list() call (for tests). */
+  lastReads = 0;
+  async list(sources, now, days = PAST_DAYS) {
+    const cutoff = now - days * DAY_MS;
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    this.lastReads = 0;
+    for (const src of sources) {
+      const root = path.join(src.configHome, "projects");
+      let folders;
+      try {
+        folders = (await (0, import_promises.readdir)(root, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+      } catch {
+        continue;
+      }
+      for (const folder of folders) {
+        let names2;
+        try {
+          names2 = (await (0, import_promises.readdir)(path.join(root, folder), { withFileTypes: true })).filter((d) => d.isFile() && d.name.endsWith(".jsonl")).map((d) => d.name);
+        } catch {
+          continue;
+        }
+        for (const name of names2) {
+          const file = path.join(root, folder, name);
+          try {
+            const st = await (0, import_promises.stat)(file);
+            if (st.mtimeMs < cutoff) {
+              continue;
+            }
+            seen.add(file);
+            let hit = this.cache.get(file);
+            if (!hit || hit.mtimeMs !== st.mtimeMs || hit.size !== st.size) {
+              const ends = await readEnds(file, st.size);
+              this.lastReads++;
+              hit = { mtimeMs: st.mtimeMs, size: st.size, info: parseTranscript(ends.head, ends.tail, ends.headIsWhole, ends.tailIsWhole) };
+              this.cache.set(file, hit);
+            }
+            const info = hit.info;
+            if (!info.cwd) {
+              continue;
+            }
+            out.push({
+              sessionId: name.slice(0, -".jsonl".length),
+              cwd: info.cwd,
+              title: info.customTitle ?? info.aiTitle ?? info.firstPrompt ?? lastSegment(info.cwd),
+              kind: kindOf(info.entrypoint),
+              lastActive: st.mtimeMs,
+              accountKey: src.accountKey
+            });
+          } catch {
+          }
+        }
+      }
+    }
+    for (const key of this.cache.keys()) {
+      if (!seen.has(key)) {
+        this.cache.delete(key);
+      }
+    }
+    return out;
+  }
+};
 
 // src/core/paths.ts
 var import_node_crypto = require("node:crypto");
 var import_node_fs = require("node:fs");
 var os = __toESM(require("node:os"));
-var path = __toESM(require("node:path"));
+var path2 = __toESM(require("node:path"));
 function accountsRoot(home = os.homedir()) {
-  return path.join(home, ".claude-accounts");
+  return path2.join(home, ".claude-accounts");
 }
 function accountFolder(root, id) {
-  return path.join(root, id);
+  return path2.join(root, id);
 }
 function newAccountId() {
   return (0, import_node_crypto.randomBytes)(4).toString("hex");
 }
 function isInside(root, target) {
-  const rel = path.relative(path.resolve(root), path.resolve(target));
-  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  const rel = path2.relative(path2.resolve(root), path2.resolve(target));
+  return rel !== "" && !rel.startsWith("..") && !path2.isAbsolute(rel);
 }
 function configHome(configDirEnv, home = os.homedir()) {
-  return configDirEnv ? configDirEnv : path.join(home, ".claude");
+  return configDirEnv ? configDirEnv : path2.join(home, ".claude");
 }
 function globalConfigPath(configDirEnv, home = os.homedir()) {
-  const globalCfg = path.join(configDirEnv ? configDirEnv : home, ".claude.json");
-  const legacy = path.join(configHome(configDirEnv, home), ".config.json");
+  const globalCfg = path2.join(configDirEnv ? configDirEnv : home, ".claude.json");
+  const legacy = path2.join(configHome(configDirEnv, home), ".config.json");
   try {
     const st = (0, import_node_fs.statSync)(legacy);
     if (st.isFile() && (st.size > 0 || isWritable(legacy) && !(0, import_node_fs.existsSync)(globalCfg))) {
@@ -78,11 +248,11 @@ function isWritable(file) {
   }
 }
 function credentialsPath(home) {
-  return path.join(home, ".credentials.json");
+  return path2.join(home, ".credentials.json");
 }
 function credentialLockPaths(home) {
   const trimmed = home.replace(/[\\/]+$/, "");
-  return [path.join(trimmed, ".oauth_refresh.lock"), trimmed + ".lock"];
+  return [path2.join(trimmed, ".oauth_refresh.lock"), trimmed + ".lock"];
 }
 function configLockPath(globalConfig) {
   return globalConfig + ".lock";
@@ -110,16 +280,16 @@ function keychainAccount(env = process.env) {
 
 // src/core/registry.ts
 var import_node_fs2 = require("node:fs");
-var import_promises3 = require("node:fs/promises");
-var path4 = __toESM(require("node:path"));
+var import_promises4 = require("node:fs/promises");
+var path5 = __toESM(require("node:path"));
 
 // src/core/fsjson.ts
 var import_node_crypto2 = require("node:crypto");
-var import_promises = require("node:fs/promises");
-var path2 = __toESM(require("node:path"));
+var import_promises2 = require("node:fs/promises");
+var path3 = __toESM(require("node:path"));
 var CorruptJsonError = class extends Error {
   constructor(file) {
-    super(`File is not valid JSON: ${path2.basename(file)}`);
+    super(`File is not valid JSON: ${path3.basename(file)}`);
     this.file = file;
     this.name = "CorruptJsonError";
   }
@@ -127,7 +297,7 @@ var CorruptJsonError = class extends Error {
 async function readJson(file) {
   let text;
   try {
-    text = await (0, import_promises.readFile)(file, "utf8");
+    text = await (0, import_promises2.readFile)(file, "utf8");
   } catch (e) {
     if (e?.code === "ENOENT") {
       return void 0;
@@ -141,37 +311,37 @@ async function readJson(file) {
   }
 }
 async function writeJsonAtomic(file, value) {
-  await (0, import_promises.mkdir)(path2.dirname(file), { recursive: true });
+  await (0, import_promises2.mkdir)(path3.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${(0, import_node_crypto2.randomBytes)(4).toString("hex")}.tmp`;
-  await (0, import_promises.writeFile)(tmp, JSON.stringify(value, null, 2), { encoding: "utf8", mode: 384 });
+  await (0, import_promises2.writeFile)(tmp, JSON.stringify(value, null, 2), { encoding: "utf8", mode: 384 });
   try {
-    await (0, import_promises.rename)(tmp, file);
+    await (0, import_promises2.rename)(tmp, file);
   } catch (e) {
-    await (0, import_promises.unlink)(tmp).catch(() => void 0);
+    await (0, import_promises2.unlink)(tmp).catch(() => void 0);
     throw e;
   }
 }
 
 // src/core/locks.ts
-var import_promises2 = require("node:fs/promises");
-var path3 = __toESM(require("node:path"));
+var import_promises3 = require("node:fs/promises");
+var path4 = __toESM(require("node:path"));
 var CREDENTIAL_STALE_MS = 6e4;
 var CONFIG_STALE_MS = 1e4;
 var TOUCH_MS = 3e3;
 var WAIT_MS = 9e3;
 var LockTimeoutError = class extends Error {
   constructor(lockPath) {
-    super(`Timed out waiting for lock ${path3.basename(lockPath)}`);
+    super(`Timed out waiting for lock ${path4.basename(lockPath)}`);
     this.name = "LockTimeoutError";
   }
 };
 var sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
 async function acquireLock(lockPath, opts) {
   const deadline = Date.now() + (opts.waitMs ?? WAIT_MS);
-  await (0, import_promises2.mkdir)(path3.dirname(lockPath), { recursive: true });
+  await (0, import_promises3.mkdir)(path4.dirname(lockPath), { recursive: true });
   for (; ; ) {
     try {
-      await (0, import_promises2.mkdir)(lockPath);
+      await (0, import_promises3.mkdir)(lockPath);
       break;
     } catch (e) {
       if (e?.code !== "EEXIST") {
@@ -180,7 +350,7 @@ async function acquireLock(lockPath, opts) {
     }
     let stale = false;
     try {
-      const st = await (0, import_promises2.stat)(lockPath);
+      const st = await (0, import_promises3.stat)(lockPath);
       stale = Date.now() - st.mtimeMs > opts.staleMs;
     } catch (e) {
       if (e?.code === "ENOENT") {
@@ -189,7 +359,7 @@ async function acquireLock(lockPath, opts) {
       throw e;
     }
     if (stale) {
-      await (0, import_promises2.rmdir)(lockPath).catch(() => void 0);
+      await (0, import_promises3.rmdir)(lockPath).catch(() => void 0);
       continue;
     }
     if (Date.now() >= deadline) {
@@ -199,7 +369,7 @@ async function acquireLock(lockPath, opts) {
   }
   const timer = setInterval(() => {
     const now = /* @__PURE__ */ new Date();
-    (0, import_promises2.utimes)(lockPath, now, now).catch(() => void 0);
+    (0, import_promises3.utimes)(lockPath, now, now).catch(() => void 0);
   }, opts.touchMs ?? TOUCH_MS);
   timer.unref();
   let released = false;
@@ -209,7 +379,7 @@ async function acquireLock(lockPath, opts) {
     }
     released = true;
     clearInterval(timer);
-    await (0, import_promises2.rmdir)(lockPath).catch((e) => {
+    await (0, import_promises3.rmdir)(lockPath).catch((e) => {
       if (e?.code !== "ENOENT") {
         throw e;
       }
@@ -267,8 +437,8 @@ var Registry = class {
   file;
   lockPath;
   constructor(root) {
-    this.file = path4.join(root, "accounts.json");
-    this.lockPath = path4.join(root, "accounts.json.lock");
+    this.file = path5.join(root, "accounts.json");
+    this.lockPath = path5.join(root, "accounts.json.lock");
   }
   async readFile() {
     try {
@@ -363,7 +533,7 @@ var Registry = class {
         if (!(e instanceof CorruptJsonError)) {
           throw e;
         }
-        await (0, import_promises3.rename)(this.file, `${this.file}.corrupt-${Date.now()}`);
+        await (0, import_promises4.rename)(this.file, `${this.file}.corrupt-${Date.now()}`);
       }
       change(file);
       await writeJsonAtomic(this.file, file);
@@ -702,18 +872,18 @@ var AccountsPanelProvider = class {
 
 // src/vscode/commands.ts
 var vscode3 = __toESM(require("vscode"));
-var import_promises5 = require("node:fs/promises");
+var import_promises6 = require("node:fs/promises");
 
 // src/core/share.ts
-var import_promises4 = require("node:fs/promises");
-var path5 = __toESM(require("node:path"));
+var import_promises5 = require("node:fs/promises");
+var path6 = __toESM(require("node:path"));
 var SHARED_DIRS = ["projects", "plugins", "skills", "commands", "agents", "output-styles", "rules", "plans"];
 var SHARED_FILES = ["settings.json", "CLAUDE.md", "keybindings.json"];
 var PROMPT_HISTORY = "history.jsonl";
 var MANIFEST = ".claude-accounts-manifest.json";
 async function exists(p, kind) {
   try {
-    const st = await (0, import_promises4.stat)(p);
+    const st = await (0, import_promises5.stat)(p);
     return kind === "dir" ? st.isDirectory() : st.isFile();
   } catch {
     return false;
@@ -721,7 +891,7 @@ async function exists(p, kind) {
 }
 async function isMissing(p) {
   try {
-    await (0, import_promises4.lstat)(p);
+    await (0, import_promises5.lstat)(p);
     return false;
   } catch (e) {
     return e?.code === "ENOENT";
@@ -729,7 +899,7 @@ async function isMissing(p) {
 }
 async function readManifest(accountHome) {
   try {
-    const m = await readJson(path5.join(accountHome, MANIFEST));
+    const m = await readJson(path6.join(accountHome, MANIFEST));
     return { links: Array.isArray(m?.links) ? m.links : [], copies: Array.isArray(m?.copies) ? m.copies : [] };
   } catch {
     return { links: [], copies: [] };
@@ -741,30 +911,30 @@ async function syncSharedSetup(o) {
   const links = new Set(manifest.links);
   const copies = new Set(manifest.copies);
   for (const name of SHARED_DIRS) {
-    const src = path5.join(o.mainHome, name);
-    const dst = path5.join(o.accountHome, name);
+    const src = path6.join(o.mainHome, name);
+    const dst = path6.join(o.accountHome, name);
     if (await exists(src, "dir") && await isMissing(dst)) {
-      await (0, import_promises4.symlink)(src, dst, windows ? "junction" : "dir");
+      await (0, import_promises5.symlink)(src, dst, windows ? "junction" : "dir");
       links.add(name);
     }
   }
   const files = windows ? SHARED_FILES : [...SHARED_FILES, PROMPT_HISTORY];
   for (const name of files) {
-    const src = path5.join(o.mainHome, name);
-    const dst = path5.join(o.accountHome, name);
+    const src = path6.join(o.mainHome, name);
+    const dst = path6.join(o.accountHome, name);
     if (!await exists(src, "file")) {
       continue;
     }
     if (windows) {
-      await (0, import_promises4.copyFile)(src, dst);
+      await (0, import_promises5.copyFile)(src, dst);
       copies.add(name);
     } else if (await isMissing(dst)) {
-      await (0, import_promises4.symlink)(src, dst, "file");
+      await (0, import_promises5.symlink)(src, dst, "file");
       links.add(name);
     }
   }
   const next = { links: [...links], copies: [...copies] };
-  await writeJsonAtomic(path5.join(o.accountHome, MANIFEST), next);
+  await writeJsonAtomic(path6.join(o.accountHome, MANIFEST), next);
   return next;
 }
 async function readObject(file) {
@@ -951,7 +1121,7 @@ function registerCommands(context, c) {
     const id = newAccountId();
     const folder = accountFolder(c.root, id);
     try {
-      await (0, import_promises5.mkdir)(folder, { recursive: true });
+      await (0, import_promises6.mkdir)(folder, { recursive: true });
       await seedGlobalConfig(globalConfigPath(c.originalConfigDir), globalConfigPath(folder));
       await syncSharedSetup({ mainHome: configHome(c.originalConfigDir), accountHome: folder, platform: process.platform });
       await c.registry.add({ id, folder });
@@ -1069,12 +1239,12 @@ function registerCommands(context, c) {
 
 // src/vscode/controller.ts
 var vscode4 = __toESM(require("vscode"));
-var import_node_crypto4 = require("node:crypto");
-var path9 = __toESM(require("node:path"));
+var import_node_crypto5 = require("node:crypto");
+var path11 = __toESM(require("node:path"));
 
 // src/core/credentials.ts
 var import_node_child_process = require("node:child_process");
-var import_promises6 = require("node:fs/promises");
+var import_promises7 = require("node:fs/promises");
 var KeychainError = class extends Error {
   constructor(message) {
     super(message);
@@ -1109,7 +1279,7 @@ async function readFileStore(t) {
   return readJson(credentialsPath(t.configHome));
 }
 async function removeFile(t) {
-  await (0, import_promises6.unlink)(credentialsPath(t.configHome)).catch((e) => {
+  await (0, import_promises7.unlink)(credentialsPath(t.configHome)).catch((e) => {
     if (e?.code !== "ENOENT") {
       throw e;
     }
@@ -1183,6 +1353,167 @@ async function readIdentity(globalConfig) {
     id.orgName = acc.organizationName;
   }
   return id;
+}
+
+// src/core/handoff.ts
+var import_promises8 = require("node:fs/promises");
+var import_node_crypto4 = require("node:crypto");
+var path7 = __toESM(require("node:path"));
+var HANDOFF_VERSION = 1;
+var CLOSE_MAX_AGE_MS = 3e4;
+var OPEN_MAX_AGE_MS = 5 * 6e4;
+var RESULT_MAX_AGE_MS = 5 * 6e4;
+var CLAIM_MAX_AGE_MS = 2 * 6e4;
+var FUTURE_SLACK_MS = 6e4;
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var OUTCOMES = ["closed", "not-here", "opened", "already-open"];
+function handoffDir(root) {
+  return path7.join(root, "handoff");
+}
+var requestFile = (root, id) => path7.join(handoffDir(root), `${id}.json`);
+var resultFile = (root, id) => path7.join(handoffDir(root), `${id}.result.json`);
+var safeWindow = (windowId) => windowId.replace(/[^A-Za-z0-9_-]/g, "_");
+var claimFile = (root, id, windowId) => path7.join(handoffDir(root), `${id}.${safeWindow(windowId)}.claim`);
+var isNum = (v) => typeof v === "number" && Number.isFinite(v);
+function parseRequest(raw, platform = process.platform) {
+  if (!raw || typeof raw !== "object") {
+    return void 0;
+  }
+  const r = raw;
+  const absolute = platform === "win32" ? path7.win32.isAbsolute : path7.posix.isAbsolute;
+  if (r.v !== HANDOFF_VERSION || r.action !== "close" && r.action !== "open") {
+    return void 0;
+  }
+  if (typeof r.sessionId !== "string" || !UUID.test(r.sessionId) || typeof r.cwd !== "string" || !absolute(r.cwd)) {
+    return void 0;
+  }
+  if (typeof r.accountKey !== "string" || !r.accountKey || !isNum(r.at)) {
+    return void 0;
+  }
+  const req = { v: 1, action: r.action, sessionId: r.sessionId, cwd: r.cwd, accountKey: r.accountKey, at: r.at };
+  if (r.action === "close") {
+    if (!isNum(r.pid) || !Number.isInteger(r.pid) || r.pid <= 0) {
+      return void 0;
+    }
+    req.pid = r.pid;
+  }
+  return req;
+}
+function isFresh(req, now) {
+  const age = now - req.at;
+  return age >= -FUTURE_SLACK_MS && age <= (req.action === "close" ? CLOSE_MAX_AGE_MS : OPEN_MAX_AGE_MS);
+}
+function parseResult(raw) {
+  const r = raw;
+  if (!r || typeof r !== "object" || r.v !== HANDOFF_VERSION || r.action !== "close" && r.action !== "open") {
+    return void 0;
+  }
+  if (typeof r.result !== "string" || !OUTCOMES.includes(r.result) || typeof r.windowId !== "string" || !isNum(r.at)) {
+    return void 0;
+  }
+  return { v: 1, action: r.action, result: r.result, windowId: r.windowId, at: r.at };
+}
+var tempName = (file) => `${file}.${process.pid}.${(0, import_node_crypto4.randomBytes)(4).toString("hex")}.tmp`;
+async function writeAtomic(file, value) {
+  await (0, import_promises8.mkdir)(path7.dirname(file), { recursive: true });
+  const tmp = tempName(file);
+  await (0, import_promises8.writeFile)(tmp, JSON.stringify(value), { encoding: "utf8", mode: 384 });
+  try {
+    await (0, import_promises8.rename)(tmp, file);
+  } catch (e) {
+    await (0, import_promises8.unlink)(tmp).catch(() => void 0);
+    throw e;
+  }
+}
+async function readParsed(file) {
+  try {
+    return JSON.parse(await (0, import_promises8.readFile)(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+async function names(root) {
+  try {
+    return await (0, import_promises8.readdir)(handoffDir(root));
+  } catch {
+    return [];
+  }
+}
+async function pendingRequests(root) {
+  return (await names(root)).map((n) => /^(.+)\.json$/.exec(n)?.[1]).filter((id) => !!id && UUID.test(id));
+}
+async function peekRequest(root, sessionId, platform = process.platform) {
+  return parseRequest(await readParsed(requestFile(root, sessionId)), platform);
+}
+async function claimRequest(root, sessionId, windowId, platform = process.platform) {
+  const claim = claimFile(root, sessionId, windowId);
+  try {
+    await (0, import_promises8.rename)(requestFile(root, sessionId), claim);
+  } catch {
+    return void 0;
+  }
+  const now = /* @__PURE__ */ new Date();
+  await (0, import_promises8.utimes)(claim, now, now).catch(() => void 0);
+  const req = parseRequest(await readParsed(claim), platform);
+  if (!req) {
+    await (0, import_promises8.unlink)(claim).catch(() => void 0);
+  }
+  return req;
+}
+async function finishClaim(root, sessionId, windowId, result) {
+  if (result) {
+    await writeAtomic(resultFile(root, sessionId), result);
+  }
+  await (0, import_promises8.unlink)(claimFile(root, sessionId, windowId)).catch(() => void 0);
+}
+async function sweep(root, now, platform = process.platform) {
+  const dir = handoffDir(root);
+  for (const name of await names(root)) {
+    const file = path7.join(dir, name);
+    let drop = false;
+    if (name.endsWith(".result.json")) {
+      const r = parseResult(await readParsed(file));
+      drop = !r || now - r.at > RESULT_MAX_AGE_MS;
+    } else if (name.endsWith(".claim")) {
+      try {
+        drop = now - (await (0, import_promises8.stat)(file)).mtimeMs > CLAIM_MAX_AGE_MS;
+      } catch {
+        drop = false;
+      }
+    } else if (/^[^.]+\.json$/.test(name)) {
+      const req = parseRequest(await readParsed(file), platform);
+      drop = !req || !isFresh(req, now);
+    }
+    if (drop) {
+      await (0, import_promises8.unlink)(file).catch(() => void 0);
+    }
+  }
+}
+function norm(p, platform) {
+  if (platform === "win32") {
+    return p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  }
+  return p.replace(/\/+$/, "");
+}
+function bestWindowFor(cwd, accountKey, windows, platform = process.platform) {
+  const c = norm(cwd, platform);
+  const sep = platform === "win32" ? "\\" : "/";
+  let best;
+  for (const w of windows) {
+    if ((w.handoff ?? 0) < HANDOFF_VERSION || w.accountKey !== accountKey) {
+      continue;
+    }
+    for (const folder of w.folders ?? []) {
+      const f = norm(folder, platform);
+      if (!f || c !== f && !c.startsWith(f + sep)) {
+        continue;
+      }
+      if (!best || f.length > best.length || f.length === best.length && w.windowId < best.w.windowId) {
+        best = { w, length: f.length };
+      }
+    }
+  }
+  return best?.w;
 }
 
 // src/core/oauth.ts
@@ -1352,14 +1683,14 @@ function buildSnapshot(i) {
 }
 
 // src/core/safeDelete.ts
-var import_promises7 = require("node:fs/promises");
-var path6 = __toESM(require("node:path"));
+var import_promises9 = require("node:fs/promises");
+var path8 = __toESM(require("node:path"));
 async function removeLink(p) {
   try {
-    await (0, import_promises7.unlink)(p);
+    await (0, import_promises9.unlink)(p);
   } catch (e) {
     if (e?.code === "EPERM" || e?.code === "EISDIR") {
-      await (0, import_promises7.rmdir)(p);
+      await (0, import_promises9.rmdir)(p);
     } else if (e?.code !== "ENOENT") {
       throw e;
     }
@@ -1368,7 +1699,7 @@ async function removeLink(p) {
 async function deleteTree(p) {
   let st;
   try {
-    st = await (0, import_promises7.lstat)(p);
+    st = await (0, import_promises9.lstat)(p);
   } catch (e) {
     if (e?.code === "ENOENT") {
       return;
@@ -1380,13 +1711,13 @@ async function deleteTree(p) {
     return;
   }
   if (st.isDirectory()) {
-    for (const name of await (0, import_promises7.readdir)(p)) {
-      await deleteTree(path6.join(p, name));
+    for (const name of await (0, import_promises9.readdir)(p)) {
+      await deleteTree(path8.join(p, name));
     }
-    await (0, import_promises7.rmdir)(p);
+    await (0, import_promises9.rmdir)(p);
     return;
   }
-  await (0, import_promises7.unlink)(p);
+  await (0, import_promises9.unlink)(p);
 }
 async function removeAccountFolder(root, folder) {
   if (!isInside(root, folder)) {
@@ -1414,15 +1745,15 @@ async function removeAccountNow(o) {
 }
 
 // src/core/usage.ts
-var path7 = __toESM(require("node:path"));
+var path9 = __toESM(require("node:path"));
 var EXPIRY_SKEW_MS = 6e4;
 var DEFAULT_BACKOFF_MS = 3e5;
 var UsageCache = class {
   file;
   lockPath;
   constructor(root) {
-    this.file = path7.join(root, "usage.json");
-    this.lockPath = path7.join(root, "usage.json.lock");
+    this.file = path9.join(root, "usage.json");
+    this.lockPath = path9.join(root, "usage.json.lock");
   }
   async read() {
     try {
@@ -1545,8 +1876,8 @@ async function check(prev, target, now, deps) {
 }
 
 // src/core/windows.ts
-var import_promises8 = require("node:fs/promises");
-var path8 = __toESM(require("node:path"));
+var import_promises10 = require("node:fs/promises");
+var path10 = __toESM(require("node:path"));
 var HEARTBEAT_STALE_MS = 9e4;
 var REFRESH_LOCK_FRESH_MS = 6e4;
 function isPidAlive(pid) {
@@ -1561,7 +1892,7 @@ var WindowRegistry = class {
   constructor(root, now = Date.now, isAlive = isPidAlive) {
     this.now = now;
     this.isAlive = isAlive;
-    this.dir = path8.join(root, "windows");
+    this.dir = path10.join(root, "windows");
   }
   dir;
   async beat(b) {
@@ -1569,19 +1900,19 @@ var WindowRegistry = class {
     await writeJsonAtomic(this.fileFor(b.windowId), beat);
   }
   async remove(windowId) {
-    await (0, import_promises8.unlink)(this.fileFor(windowId)).catch(() => void 0);
+    await (0, import_promises10.unlink)(this.fileFor(windowId)).catch(() => void 0);
   }
   /** Beats that are recent and whose process is still running. Dead ones are cleaned up. */
   async live() {
-    let names;
+    let names2;
     try {
-      names = await (0, import_promises8.readdir)(this.dir);
+      names2 = await (0, import_promises10.readdir)(this.dir);
     } catch {
       return [];
     }
     const out = [];
-    for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
-      const file = path8.join(this.dir, name);
+    for (const name of names2.filter((n) => n.endsWith(".json")).sort()) {
+      const file = path10.join(this.dir, name);
       let beat;
       try {
         beat = await readJson(file);
@@ -1592,13 +1923,13 @@ var WindowRegistry = class {
       if (beat && fresh && this.isAlive(beat.pid)) {
         out.push(beat);
       } else {
-        await (0, import_promises8.unlink)(file).catch(() => void 0);
+        await (0, import_promises10.unlink)(file).catch(() => void 0);
       }
     }
     return out;
   }
   fileFor(windowId) {
-    return path8.join(this.dir, `${windowId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
+    return path10.join(this.dir, `${windowId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
   }
 };
 async function isAccountInUse(a) {
@@ -1607,16 +1938,16 @@ async function isAccountInUse(a) {
   if (a.liveWindows.some((w) => w.accountKey === a.accountKey)) {
     return true;
   }
-  const sessionsDir = path8.join(a.configHome, "sessions");
-  let names = [];
+  const sessionsDir = path10.join(a.configHome, "sessions");
+  let names2 = [];
   try {
-    names = await (0, import_promises8.readdir)(sessionsDir);
+    names2 = await (0, import_promises10.readdir)(sessionsDir);
   } catch {
-    names = [];
+    names2 = [];
   }
-  for (const name of names.filter((n) => n.endsWith(".json"))) {
+  for (const name of names2.filter((n) => n.endsWith(".json"))) {
     try {
-      const s = await readJson(path8.join(sessionsDir, name));
+      const s = await readJson(path10.join(sessionsDir, name));
       if (typeof s?.pid === "number" && isAlive(s.pid)) {
         return true;
       }
@@ -1624,7 +1955,7 @@ async function isAccountInUse(a) {
     }
   }
   try {
-    const st = await (0, import_promises8.stat)(path8.join(a.configHome, ".oauth_refresh.lock"));
+    const st = await (0, import_promises10.stat)(path10.join(a.configHome, ".oauth_refresh.lock"));
     if (now() - st.mtimeMs <= REFRESH_LOCK_FRESH_MS) {
       return true;
     }
@@ -1653,7 +1984,7 @@ var AccountsController = class {
   cache;
   credentials;
   windows;
-  windowId = (0, import_node_crypto4.randomUUID)();
+  windowId = (0, import_node_crypto5.randomUUID)();
   pollTimer;
   beatTimer;
   queue = Promise.resolve();
@@ -1709,7 +2040,9 @@ var AccountsController = class {
         workspaceName: vscode4.workspace.name ?? "Untitled window",
         pid: process.pid,
         folders,
-        ...openTarget ? { openTarget } : {}
+        ...openTarget ? { openTarget } : {},
+        handoff: HANDOFF_VERSION
+        // tells Claude Away this window can close and reopen Claude tabs
       });
     } catch (e) {
       this.log.warn(`heartbeat failed: ${e?.code ?? e?.name ?? "error"}`);
@@ -1743,7 +2076,7 @@ var AccountsController = class {
         refresh: (cred) => refreshAccessToken(cred),
         inUse: () => isAccountInUse({ accountKey: key, configHome: target.configHome, liveWindows }),
         withCredentialLocks,
-        withFetchLock: (k, fn) => withLock(path9.join(this.root, "locks", `fetch-${k}.lock`), { staleMs: 3e4 }, fn),
+        withFetchLock: (k, fn) => withLock(path11.join(this.root, "locks", `fetch-${k}.lock`), { staleMs: 3e4 }, fn),
         now: Date.now
       }).catch((e) => this.log.warn(`poll ${key}: ${e?.name ?? "Error"}`))
     ));
@@ -1895,18 +2228,273 @@ var StatusBar = class {
   }
 };
 
-// src/vscode/sessions.ts
+// src/vscode/handoff.ts
 var vscode6 = __toESM(require("vscode"));
 var import_node_fs3 = require("node:fs");
 var import_promises12 = require("node:fs/promises");
-var path13 = __toESM(require("node:path"));
+
+// src/core/claudeTabs.ts
+var tidy = (s) => s.replace(/\s+/g, " ").trim();
+function labelMatches(label, title) {
+  const l = tidy(label);
+  const t = tidy(title ?? "");
+  if (!l || !t) {
+    return false;
+  }
+  if (l.endsWith("\u2026")) {
+    const start = l.slice(0, -1);
+    return start !== "" && t !== start && t.startsWith(start);
+  }
+  return l === t;
+}
+function pickTab(before, after, title, otherTitles) {
+  const active = after.tabs.find((t) => t.key === after.activeKey);
+  if (!active?.isClaude) {
+    return { kind: "none" };
+  }
+  const count = (s) => s.tabs.filter((t) => t.isClaude).length;
+  if (count(after) > count(before)) {
+    return { kind: "new", key: active.key };
+  }
+  if (active.key !== before.activeKey) {
+    return { kind: "existing", key: active.key };
+  }
+  if (labelMatches(active.label, title) && !otherTitles.some((o) => labelMatches(active.label, o))) {
+    return { kind: "existing", key: active.key };
+  }
+  return { kind: "none" };
+}
+
+// src/core/sessions.ts
+var import_promises11 = require("node:fs/promises");
+var path12 = __toESM(require("node:path"));
+function kindOf2(entrypoint) {
+  if (entrypoint === "claude-vscode") {
+    return "ide";
+  }
+  if (entrypoint === "claude-desktop") {
+    return "app";
+  }
+  return "terminal";
+}
+function statusOf(status) {
+  if (status === "waiting") {
+    return "waiting";
+  }
+  if (status === "busy" || status === "shell") {
+    return "working";
+  }
+  return "idle";
+}
+function lastSegment2(p) {
+  const parts = p.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+var num = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
+async function listSessions(sources, isAlive = isPidAlive) {
+  const out = [];
+  for (const src of sources) {
+    const dir = path12.join(src.configHome, "sessions");
+    let names2;
+    try {
+      names2 = await (0, import_promises11.readdir)(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names2) {
+      if (!name.endsWith(".json")) {
+        continue;
+      }
+      let raw;
+      try {
+        raw = await readJson(path12.join(dir, name));
+      } catch {
+        continue;
+      }
+      if (!raw || typeof raw.pid !== "number" || typeof raw.sessionId !== "string" || typeof raw.cwd !== "string") {
+        continue;
+      }
+      if (!isAlive(raw.pid)) {
+        continue;
+      }
+      out.push({
+        pid: raw.pid,
+        sessionId: raw.sessionId,
+        cwd: raw.cwd,
+        name: typeof raw.name === "string" && raw.name ? raw.name : lastSegment2(raw.cwd),
+        kind: kindOf2(raw.entrypoint),
+        status: statusOf(raw.status),
+        since: num(raw.statusUpdatedAt) ?? num(raw.updatedAt) ?? num(raw.startedAt) ?? 0,
+        accountKey: src.accountKey
+      });
+    }
+  }
+  return out;
+}
+
+// src/vscode/handoff.ts
+var SETTLE_MS = 300;
+var FREE_WAIT_MS = 3e4;
+var FREE_POLL_MS = 500;
+var POLL_MS = 1e3;
+var OPEN = "claude-vscode.editor.open";
+var CLAUDE_VIEW = /claudeVSCodePanel$/;
+var HandoffController = class {
+  constructor(d) {
+    this.d = d;
+    this.platform = d.platform ?? process.platform;
+    this.now = d.now ?? Date.now;
+    this.isAlive = d.isAlive ?? isPidAlive;
+    this.sleep = d.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  }
+  platform;
+  now;
+  isAlive;
+  sleep;
+  busy = false;
+  timer;
+  watcher;
+  start() {
+    const run = () => void this.handleAll();
+    void (0, import_promises12.mkdir)(handoffDir(this.d.root), { recursive: true }).then(() => {
+      try {
+        this.watcher = (0, import_node_fs3.watch)(handoffDir(this.d.root), run);
+      } catch (e) {
+        this.d.log.warn(`handoff watcher: ${e?.code ?? "error"}`);
+      }
+    }).catch(() => void 0);
+    this.timer = setInterval(run, POLL_MS);
+  }
+  /** One pass over the waiting requests. Only one pass runs at a time. */
+  async handleAll() {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    try {
+      await sweep(this.d.root, this.now(), this.platform);
+      const ids = await pendingRequests(this.d.root);
+      if (!ids.length) {
+        return;
+      }
+      const windows = await this.d.liveWindows();
+      for (const id of ids) {
+        const req = await peekRequest(this.d.root, id, this.platform);
+        if (!req || !isFresh(req, this.now()) || req.accountKey !== this.d.thisAccountKey()) {
+          continue;
+        }
+        if (bestWindowFor(req.cwd, req.accountKey, windows, this.platform)?.windowId !== this.d.thisWindowId) {
+          continue;
+        }
+        const claimed = await claimRequest(this.d.root, id, this.d.thisWindowId, this.platform);
+        if (claimed) {
+          await this.act(claimed);
+        }
+      }
+    } catch (e) {
+      this.d.log.warn(`handoff: ${e?.code ?? e?.name ?? "error"}`);
+    } finally {
+      this.busy = false;
+    }
+  }
+  async act(req) {
+    let result;
+    try {
+      result = req.action === "close" ? await this.close(req) : await this.open(req);
+    } catch (e) {
+      this.d.log.warn(`handoff ${req.action}: ${e?.code ?? e?.name ?? "error"}`);
+      result = "not-here";
+    }
+    await finishClaim(this.d.root, req.sessionId, this.d.thisWindowId, { v: 1, action: req.action, result, windowId: this.d.thisWindowId, at: this.now() });
+  }
+  /** Close the conversation's tab, but only while its Claude is idle: never in the middle of a task. */
+  async close(req) {
+    const sessions = await this.running();
+    const s = sessions.find((x) => x.sessionId === req.sessionId && x.kind === "ide" && x.pid === req.pid);
+    if (!s || s.status !== "idle") {
+      return "not-here";
+    }
+    const pick = await this.show(req.sessionId, sessions);
+    if (pick.kind === "none") {
+      return "not-here";
+    }
+    await this.closeTab(pick.key);
+    return pick.kind === "existing" ? "closed" : "not-here";
+  }
+  /** Open the conversation again once Claude Away's copy has ended, replacing a dead tab if one is left. */
+  async open(req) {
+    let sessions = await this.running();
+    for (let i = 0; i < FREE_WAIT_MS / FREE_POLL_MS; i++) {
+      const holders = sessions.filter((x) => x.sessionId === req.sessionId);
+      if (holders.some((x) => x.kind === "ide")) {
+        return "already-open";
+      }
+      if (!holders.length) {
+        break;
+      }
+      await this.sleep(FREE_POLL_MS);
+      sessions = await this.running();
+    }
+    const pick = await this.show(req.sessionId, sessions);
+    if (pick.kind === "existing") {
+      await this.closeTab(pick.key);
+      await this.sleep(SETTLE_MS);
+      await vscode6.commands.executeCommand(OPEN, req.sessionId);
+    }
+    return "opened";
+  }
+  /** Asks Claude to show the conversation, and works out which tab that brought forward. */
+  async show(sessionId, sessions) {
+    const titles = await this.d.titles();
+    const others = sessions.filter((x) => x.sessionId !== sessionId).map((x) => titles.get(x.sessionId)).filter((t) => !!t);
+    const before = this.snapshot();
+    await vscode6.commands.executeCommand(OPEN, sessionId);
+    await this.sleep(SETTLE_MS);
+    return pickTab(before, this.snapshot(), titles.get(sessionId), others);
+  }
+  running() {
+    return this.d.sources().then((s) => listSessions(s, this.isAlive));
+  }
+  tabs() {
+    const out = [];
+    for (const g of vscode6.window.tabGroups.all) {
+      g.tabs.forEach((tab, i) => {
+        const isClaude = tab.input instanceof vscode6.TabInputWebview && CLAUDE_VIEW.test(tab.input.viewType);
+        out.push({ info: { key: `${g.viewColumn}:${i}:${tab.label}`, label: tab.label, isClaude }, tab, active: g.isActive && tab.isActive });
+      });
+    }
+    return out;
+  }
+  snapshot() {
+    const all = this.tabs();
+    return { tabs: all.map((t) => t.info), activeKey: all.find((t) => t.active)?.info.key };
+  }
+  async closeTab(key) {
+    const t = this.tabs().find((x) => x.info.key === key);
+    if (t) {
+      await vscode6.window.tabGroups.close(t.tab);
+    }
+  }
+  dispose() {
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+    this.watcher?.close();
+  }
+};
+
+// src/vscode/sessions.ts
+var vscode7 = __toESM(require("vscode"));
+var import_node_fs4 = require("node:fs");
+var import_promises14 = require("node:fs/promises");
+var path14 = __toESM(require("node:path"));
 
 // src/core/jumpRequests.ts
-var import_promises9 = require("node:fs/promises");
-var path10 = __toESM(require("node:path"));
+var import_promises13 = require("node:fs/promises");
+var path13 = __toESM(require("node:path"));
 var REQUEST_MAX_AGE_MS = 3e4;
 function requestPath(root, windowId) {
-  return path10.join(root, "requests", `${windowId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
+  return path13.join(root, "requests", `${windowId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
 }
 async function writeJumpRequest(root, windowId, req) {
   await writeJsonAtomic(requestPath(root, windowId), req);
@@ -1919,7 +2507,7 @@ async function takeJumpRequest(root, windowId, now, maxAgeMs = REQUEST_MAX_AGE_M
   } catch {
     req = void 0;
   }
-  await (0, import_promises9.unlink)(file).catch(() => void 0);
+  await (0, import_promises13.unlink)(file).catch(() => void 0);
   if (!req || typeof req.sessionId !== "string" || typeof req.pid !== "number" || typeof req.at !== "number") {
     return void 0;
   }
@@ -1963,243 +2551,6 @@ async function ancestors(pid, levels, platform, run = defaultRunner) {
   return out;
 }
 
-// src/core/pastSessions.ts
-var import_promises10 = require("node:fs/promises");
-var path11 = __toESM(require("node:path"));
-var PAST_DAYS = 30;
-var DAY_MS = 24 * 60 * 60 * 1e3;
-var HEAD_BYTES = 64 * 1024;
-var TAIL_BYTES = 128 * 1024;
-var PROMPT_LIMIT = 60;
-function lines(text, dropFirst, dropLast) {
-  const parts = text.split("\n");
-  if (dropFirst) {
-    parts.shift();
-  }
-  if (dropLast) {
-    parts.pop();
-  }
-  const out = [];
-  for (const line of parts) {
-    if (!line.trim()) {
-      continue;
-    }
-    try {
-      out.push(JSON.parse(line));
-    } catch {
-    }
-  }
-  return out;
-}
-function promptText(entry) {
-  if (entry?.type !== "user" || entry.isMeta || entry.isSidechain) {
-    return void 0;
-  }
-  const content = entry.message?.content;
-  let text;
-  if (typeof content === "string") {
-    text = content;
-  } else if (Array.isArray(content)) {
-    text = content.find((p) => p?.type === "text" && typeof p.text === "string")?.text;
-  }
-  const first = text?.trim().split(/\r?\n/)[0]?.trim();
-  if (!first || first.startsWith("<")) {
-    return void 0;
-  }
-  return first.length > PROMPT_LIMIT ? first.slice(0, PROMPT_LIMIT - 1) + "\u2026" : first;
-}
-function parseTranscript(head, tail, headIsWhole, tailIsWhole) {
-  const info = {};
-  for (const e of lines(head, false, !headIsWhole)) {
-    if (!info.cwd && typeof e?.cwd === "string" && e.cwd) {
-      info.cwd = e.cwd;
-    }
-    if (!info.entrypoint && typeof e?.entrypoint === "string") {
-      info.entrypoint = e.entrypoint;
-    }
-    if (!info.firstPrompt) {
-      info.firstPrompt = promptText(e);
-    }
-    if (e?.type === "custom-title" && typeof e.customTitle === "string" && e.customTitle) {
-      info.customTitle = e.customTitle;
-    }
-    if (e?.type === "ai-title" && typeof e.aiTitle === "string" && e.aiTitle) {
-      info.aiTitle = e.aiTitle;
-    }
-  }
-  for (const e of lines(tail, !tailIsWhole, false)) {
-    if (e?.type === "custom-title" && typeof e.customTitle === "string" && e.customTitle) {
-      info.customTitle = e.customTitle;
-    }
-    if (e?.type === "ai-title" && typeof e.aiTitle === "string" && e.aiTitle) {
-      info.aiTitle = e.aiTitle;
-    }
-  }
-  return info;
-}
-function lastSegment(p) {
-  const parts = p.split(/[\\/]+/).filter(Boolean);
-  return parts[parts.length - 1] ?? p;
-}
-function kindOf(entrypoint) {
-  if (entrypoint === "claude-vscode") {
-    return "ide";
-  }
-  if (entrypoint === "claude-desktop") {
-    return "app";
-  }
-  return "terminal";
-}
-async function readEnds(file, size) {
-  const fh = await (0, import_promises10.open)(file, "r");
-  try {
-    const headLen = Math.min(size, HEAD_BYTES);
-    const head = Buffer.alloc(headLen);
-    await fh.read(head, 0, headLen, 0);
-    if (size <= HEAD_BYTES) {
-      const text = head.toString("utf8");
-      return { head: text, tail: "", headIsWhole: true, tailIsWhole: true };
-    }
-    const tailLen = Math.min(size, TAIL_BYTES);
-    const tail = Buffer.alloc(tailLen);
-    await fh.read(tail, 0, tailLen, size - tailLen);
-    return { head: head.toString("utf8"), tail: tail.toString("utf8"), headIsWhole: false, tailIsWhole: tailLen === size };
-  } finally {
-    await fh.close();
-  }
-}
-var PastSessionReader = class {
-  cache = /* @__PURE__ */ new Map();
-  /** How many transcripts were actually opened on the last list() call (for tests). */
-  lastReads = 0;
-  async list(sources, now, days = PAST_DAYS) {
-    const cutoff = now - days * DAY_MS;
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    this.lastReads = 0;
-    for (const src of sources) {
-      const root = path11.join(src.configHome, "projects");
-      let folders;
-      try {
-        folders = (await (0, import_promises10.readdir)(root, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
-      } catch {
-        continue;
-      }
-      for (const folder of folders) {
-        let names;
-        try {
-          names = (await (0, import_promises10.readdir)(path11.join(root, folder), { withFileTypes: true })).filter((d) => d.isFile() && d.name.endsWith(".jsonl")).map((d) => d.name);
-        } catch {
-          continue;
-        }
-        for (const name of names) {
-          const file = path11.join(root, folder, name);
-          try {
-            const st = await (0, import_promises10.stat)(file);
-            if (st.mtimeMs < cutoff) {
-              continue;
-            }
-            seen.add(file);
-            let hit = this.cache.get(file);
-            if (!hit || hit.mtimeMs !== st.mtimeMs || hit.size !== st.size) {
-              const ends = await readEnds(file, st.size);
-              this.lastReads++;
-              hit = { mtimeMs: st.mtimeMs, size: st.size, info: parseTranscript(ends.head, ends.tail, ends.headIsWhole, ends.tailIsWhole) };
-              this.cache.set(file, hit);
-            }
-            const info = hit.info;
-            if (!info.cwd) {
-              continue;
-            }
-            out.push({
-              sessionId: name.slice(0, -".jsonl".length),
-              cwd: info.cwd,
-              title: info.customTitle ?? info.aiTitle ?? info.firstPrompt ?? lastSegment(info.cwd),
-              kind: kindOf(info.entrypoint),
-              lastActive: st.mtimeMs,
-              accountKey: src.accountKey
-            });
-          } catch {
-          }
-        }
-      }
-    }
-    for (const key of this.cache.keys()) {
-      if (!seen.has(key)) {
-        this.cache.delete(key);
-      }
-    }
-    return out;
-  }
-};
-
-// src/core/sessions.ts
-var import_promises11 = require("node:fs/promises");
-var path12 = __toESM(require("node:path"));
-function kindOf2(entrypoint) {
-  if (entrypoint === "claude-vscode") {
-    return "ide";
-  }
-  if (entrypoint === "claude-desktop") {
-    return "app";
-  }
-  return "terminal";
-}
-function statusOf(status) {
-  if (status === "waiting") {
-    return "waiting";
-  }
-  if (status === "busy" || status === "shell") {
-    return "working";
-  }
-  return "idle";
-}
-function lastSegment2(p) {
-  const parts = p.split(/[\\/]+/).filter(Boolean);
-  return parts[parts.length - 1] ?? p;
-}
-var num = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
-async function listSessions(sources, isAlive = isPidAlive) {
-  const out = [];
-  for (const src of sources) {
-    const dir = path12.join(src.configHome, "sessions");
-    let names;
-    try {
-      names = await (0, import_promises11.readdir)(dir);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      if (!name.endsWith(".json")) {
-        continue;
-      }
-      let raw;
-      try {
-        raw = await readJson(path12.join(dir, name));
-      } catch {
-        continue;
-      }
-      if (!raw || typeof raw.pid !== "number" || typeof raw.sessionId !== "string" || typeof raw.cwd !== "string") {
-        continue;
-      }
-      if (!isAlive(raw.pid)) {
-        continue;
-      }
-      out.push({
-        pid: raw.pid,
-        sessionId: raw.sessionId,
-        cwd: raw.cwd,
-        name: typeof raw.name === "string" && raw.name ? raw.name : lastSegment2(raw.cwd),
-        kind: kindOf2(raw.entrypoint),
-        status: statusOf(raw.status),
-        since: num(raw.statusUpdatedAt) ?? num(raw.updatedAt) ?? num(raw.startedAt) ?? 0,
-        accountKey: src.accountKey
-      });
-    }
-  }
-  return out;
-}
-
 // src/core/sessionsModel.ts
 var NOTE_APP = "This session runs in the Claude app.";
 var NOTE_OUTSIDE_TERMINAL = "This session runs in a terminal outside the editor.";
@@ -2213,18 +2564,18 @@ var GROUPS = [
   { status: "working", heading: "Working" },
   { status: "idle", heading: "Idle" }
 ];
-function norm(p, platform) {
+function norm2(p, platform) {
   if (platform === "win32") {
     return p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
   }
   return p.replace(/\/+$/, "");
 }
 function samePath(a, b, platform = process.platform) {
-  return norm(a, platform) === norm(b, platform);
+  return norm2(a, platform) === norm2(b, platform);
 }
 function isUnder(child, folder, platform = process.platform) {
-  const c = norm(child, platform);
-  const f = norm(folder, platform);
+  const c = norm2(child, platform);
+  const f = norm2(folder, platform);
   const sep = platform === "win32" ? "\\" : "/";
   return c === f || c.startsWith(f + sep);
 }
@@ -2383,7 +2734,7 @@ var SessionsController = class {
     this.platform = d.platform ?? process.platform;
     this.now = d.now ?? Date.now;
   }
-  emitter = new vscode6.EventEmitter();
+  emitter = new vscode7.EventEmitter();
   onDidChange = this.emitter.event;
   model = { count: 0, groups: [], past: [] };
   sessions = [];
@@ -2460,16 +2811,16 @@ var SessionsController = class {
     }
     if (place.where === "otherWindow") {
       if (!live.some((w) => w.windowId === place.windowId)) {
-        void vscode6.window.showInformationMessage("That window just closed.");
+        void vscode7.window.showInformationMessage("That window just closed.");
         return "gone";
       }
       await writeJumpRequest(this.d.root, place.windowId, { sessionId: s.sessionId, pid: s.pid, kind: s.kind, at: this.now() });
-      await vscode6.commands.executeCommand("vscode.openFolder", vscode6.Uri.file(place.openTarget), { forceNewWindow: true });
+      await vscode7.commands.executeCommand("vscode.openFolder", vscode7.Uri.file(place.openTarget), { forceNewWindow: true });
       return "forwarded";
     }
     const row = this.model.groups.flatMap((g) => g.rows).find((r) => r.sessionId === sessionId) ?? toSessionsModel([s], live, this.d.accounts(), this.d.thisWindowId, this.now(), this.platform).groups[0]?.rows[0];
     if (row?.note) {
-      void vscode6.window.showInformationMessage(row.note);
+      void vscode7.window.showInformationMessage(row.note);
     }
     return "noted";
   }
@@ -2481,14 +2832,14 @@ var SessionsController = class {
     }
     if (!row.canJump) {
       if (row.note) {
-        void vscode6.window.showInformationMessage(row.note);
+        void vscode7.window.showInformationMessage(row.note);
       }
       return "noted";
     }
     try {
-      await vscode6.commands.executeCommand("claude-vscode.editor.open", sessionId);
+      await vscode7.commands.executeCommand("claude-vscode.editor.open", sessionId);
     } catch {
-      void vscode6.window.showWarningMessage("Couldn't reopen that Claude conversation here.");
+      void vscode7.window.showWarningMessage("Couldn't reopen that Claude conversation here.");
     }
     return "opened";
   }
@@ -2500,10 +2851,10 @@ var SessionsController = class {
     }
   }
   startWatching() {
-    const dir = path13.join(this.d.root, "requests");
-    void (0, import_promises12.mkdir)(dir, { recursive: true }).then(() => {
+    const dir = path14.join(this.d.root, "requests");
+    void (0, import_promises14.mkdir)(dir, { recursive: true }).then(() => {
       try {
-        this.watcher = (0, import_node_fs3.watch)(dir, () => void this.handleRequest().catch(() => void 0));
+        this.watcher = (0, import_node_fs4.watch)(dir, () => void this.handleRequest().catch(() => void 0));
       } catch (e) {
         this.d.log.warn(`request watcher: ${e?.code ?? "error"}`);
       }
@@ -2513,15 +2864,15 @@ var SessionsController = class {
   async showHere(sessionId, pid, kind) {
     if (kind === "ide") {
       try {
-        await vscode6.commands.executeCommand("claude-vscode.editor.open", sessionId);
+        await vscode7.commands.executeCommand("claude-vscode.editor.open", sessionId);
       } catch {
-        void vscode6.window.showWarningMessage("Couldn't open that Claude session here.");
+        void vscode7.window.showWarningMessage("Couldn't open that Claude session here.");
       }
       return;
     }
     if (kind === "terminal") {
       const family = await ancestors(pid, TERMINAL_LEVELS, this.platform, this.d.run);
-      for (const t of vscode6.window.terminals) {
+      for (const t of vscode7.window.terminals) {
         const shell = await t.processId;
         if (shell !== void 0 && family.includes(shell)) {
           t.show();
@@ -2543,14 +2894,14 @@ var SessionsController = class {
 };
 
 // src/vscode/windowAccount.ts
-var vscode7 = __toESM(require("vscode"));
-var import_node_fs4 = require("node:fs");
+var vscode8 = __toESM(require("vscode"));
+var import_node_fs5 = require("node:fs");
 var CLAUDE_EXTENSION_ID = "anthropic.claude-code";
 var RELOAD_PROMPT_KEY = "claudeSwap.lastReloadPrompt";
 var RELOAD_PROMPT_GAP_MS = 12e4;
 async function applyWindowAccount(context, originalConfigDir, registry, log) {
   const choice = context.workspaceState.get(WINDOW_ACCOUNT_KEY);
-  const resolved = resolveWindowEnv({ choice, accounts: registry.listSync(), folderExists: import_node_fs4.existsSync, originalConfigDir });
+  const resolved = resolveWindowEnv({ choice, accounts: registry.listSync(), folderExists: import_node_fs5.existsSync, originalConfigDir });
   const terminalEnv = context.environmentVariableCollection;
   if (resolved.configDir) {
     process.env.CLAUDE_CONFIG_DIR = resolved.configDir;
@@ -2562,7 +2913,7 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
   terminalEnv.description = "Gives Claude in this window's terminals the same account as this window.";
   if (resolved.warning) {
     await context.workspaceState.update(WINDOW_ACCOUNT_KEY, MAIN_KEY);
-    void vscode7.window.showWarningMessage(resolved.warning);
+    void vscode8.window.showWarningMessage(resolved.warning);
   }
   if (resolved.key !== MAIN_KEY && resolved.configDir) {
     try {
@@ -2572,25 +2923,25 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
       log.warn(`Could not share your Claude setup with this account: ${e?.code ?? e?.name ?? "error"}`);
     }
   }
-  const claudeSettings = vscode7.workspace.getConfiguration("claudeCode").get("environmentVariables");
+  const claudeSettings = vscode8.workspace.getConfiguration("claudeCode").get("environmentVariables");
   if (findConfigDirOverride(claudeSettings)) {
-    void vscode7.window.showWarningMessage(
+    void vscode8.window.showWarningMessage(
       "Your Claude settings set CLAUDE_CONFIG_DIR for every window, so each window can't have its own account. Remove it from claudeCode.environmentVariables.",
       "Open Settings"
     ).then((pick) => {
       if (pick) {
-        void vscode7.commands.executeCommand("workbench.action.openSettings", "claudeCode.environmentVariables");
+        void vscode8.commands.executeCommand("workbench.action.openSettings", "claudeCode.environmentVariables");
       }
     });
   }
-  const claude = vscode7.extensions.getExtension(CLAUDE_EXTENSION_ID);
+  const claude = vscode8.extensions.getExtension(CLAUDE_EXTENSION_ID);
   if (claude?.isActive && resolved.configDir !== originalConfigDir) {
     const last = context.workspaceState.get(RELOAD_PROMPT_KEY) ?? 0;
     if (Date.now() - last > RELOAD_PROMPT_GAP_MS) {
       await context.workspaceState.update(RELOAD_PROMPT_KEY, Date.now());
-      void vscode7.window.showInformationMessage("Reload this window so Claude uses this window's account.", "Reload").then((pick) => {
+      void vscode8.window.showInformationMessage("Reload this window so Claude uses this window's account.", "Reload").then((pick) => {
         if (pick) {
-          void vscode7.commands.executeCommand("workbench.action.reloadWindow");
+          void vscode8.commands.executeCommand("workbench.action.reloadWindow");
         }
       });
     }
@@ -2602,7 +2953,7 @@ async function applyWindowAccount(context, originalConfigDir, registry, log) {
 var ORIGINAL_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || void 0;
 var controller;
 async function activate(context) {
-  const log = vscode8.window.createOutputChannel("Claude Swap Status", { log: true });
+  const log = vscode9.window.createOutputChannel("Claude Swap Status", { log: true });
   context.subscriptions.push(log);
   const root = accountsRoot();
   const registry = new Registry(root);
@@ -2616,24 +2967,25 @@ async function activate(context) {
     c.onDidChange((views) => statusBar.update(views))
   );
   registerCommands(context, c);
+  const sources = async () => [
+    { accountKey: MAIN_KEY, configHome: configHome(ORIGINAL_CONFIG_DIR) },
+    ...(await registry.list()).map((a) => ({ accountKey: a.id, configHome: a.folder }))
+  ];
   const sessions = new SessionsController({
     root,
     thisWindowId: c.windowId,
-    sources: async () => [
-      { accountKey: MAIN_KEY, configHome: configHome(ORIGINAL_CONFIG_DIR) },
-      ...(await registry.list()).map((a) => ({ accountKey: a.id, configHome: a.folder }))
-    ],
+    sources,
     liveWindows: () => c.windows.live(),
     accounts: () => c.views,
-    thisFolders: () => (vscode8.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+    thisFolders: () => (vscode9.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
     log
   });
   context.subscriptions.push(
     sessions,
-    vscode8.commands.registerCommand("claudeSwap.jumpToSession", async (sessionId) => {
+    vscode9.commands.registerCommand("claudeSwap.jumpToSession", async (sessionId) => {
       if (!sessionId) {
         await sessions.refresh();
-        const pick = await vscode8.window.showQuickPick(
+        const pick = await vscode9.window.showQuickPick(
           sessions.model.groups.flatMap((g) => g.rows.map((r) => ({
             label: `${r.isMain ? "\u{1F451} " : ""}${r.title}`,
             description: `${g.heading} \xB7 ${r.accountName}`,
@@ -2649,15 +3001,27 @@ async function activate(context) {
       }
     })
   );
-  context.subscriptions.push(vscode8.commands.registerCommand("claudeSwap.refreshStatus", async () => {
+  context.subscriptions.push(vscode9.commands.registerCommand("claudeSwap.refreshStatus", async () => {
     await Promise.all([
       c.refresh(true),
       sessions.refresh(true).catch((e) => log.warn(`sessions refresh: ${e?.name ?? "error"}`))
     ]);
   }));
   sessions.startWatching();
+  const titlesReader = new PastSessionReader();
+  const handoff = new HandoffController({
+    root,
+    thisWindowId: c.windowId,
+    thisAccountKey: () => c.thisWindowKey,
+    sources,
+    liveWindows: () => c.windows.live(),
+    titles: async () => new Map((await titlesReader.list(await sources(), Date.now())).map((p) => [p.sessionId, p.title])),
+    log
+  });
+  context.subscriptions.push(handoff);
+  handoff.start();
   const panel = new AccountsPanelProvider(context.extensionUri, c, sessions);
-  context.subscriptions.push(panel, vscode8.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel));
+  context.subscriptions.push(panel, vscode9.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel));
   c.start();
   void finishPendingRemoval(context.workspaceState, (id) => c.removeAccount(id)).then(() => c.refresh(true));
   return {
