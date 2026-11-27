@@ -135,14 +135,21 @@ export function toSessionsModel(
     thisWindowId: string,
     now: number,
     platform: NodeJS.Platform = process.platform,
+    /** Conversation titles by session id, from the transcripts (the title the Claude tab shows). */
+    titles: ReadonlyMap<string, string> = new Map(),
 ): SessionsModel {
     const groups: SessionGroup[] = [];
     for (const g of GROUPS) {
         const rows = sessions
             .filter((s) => s.status === g.status)
-            .sort((a, b) => a.since - b.since)
+            .sort((a, b) => b.since - a.since)
             .map((s): SessionRow => {
-                const title = lastSegment(s.cwd);
+                const folder = lastSegment(s.cwd);
+                const known = titles.get(s.sessionId);
+                // With a conversation title, show it like a finished row: title, then folder.
+                // Without one, the folder, then the session's own name.
+                const title = known ? cut(known) : folder;
+                const subtitle = known ? (known === folder ? '' : folder) : s.name === folder ? '' : cut(s.name);
                 const account = accounts.find((v) => v.key === s.accountKey);
                 const w = where(s.kind, locate(s, liveWindows, thisWindowId, platform));
                 const row: SessionRow = {
@@ -151,7 +158,7 @@ export function toSessionsModel(
                     kind: s.kind,
                     status: s.status,
                     title,
-                    subtitle: s.name === title ? '' : cut(s.name),
+                    subtitle,
                     accountName: account?.label ?? s.accountKey,
                     isMain: account?.isMain ?? false,
                     whereText: w.whereText,

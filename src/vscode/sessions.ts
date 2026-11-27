@@ -76,7 +76,7 @@ export class SessionsController implements vscode.Disposable {
         }
         const accounts = this.d.accounts();
         this.model = {
-            ...toSessionsModel(this.sessions, this.windows, accounts, this.d.thisWindowId, now, this.platform),
+            ...toSessionsModel(this.sessions, this.windows, accounts, this.d.thisWindowId, now, this.platform, new Map(this.past.map((p) => [p.sessionId, p.title]))),
             past: toPastGroups(this.past, {
                 runningIds: new Set(this.sessions.map((x) => x.sessionId)),
                 accounts,

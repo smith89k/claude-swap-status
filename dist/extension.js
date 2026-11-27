@@ -2269,11 +2269,14 @@ function where(kind, place) {
       return { whereText: "outside the editor", canJump: false, note: kind === "ide" ? NOTE_UNREACHABLE_WINDOW : NOTE_OUTSIDE_TERMINAL };
   }
 }
-function toSessionsModel(sessions, liveWindows, accounts, thisWindowId, now, platform = process.platform) {
+function toSessionsModel(sessions, liveWindows, accounts, thisWindowId, now, platform = process.platform, titles = /* @__PURE__ */ new Map()) {
   const groups = [];
   for (const g of GROUPS) {
-    const rows = sessions.filter((s) => s.status === g.status).sort((a, b) => a.since - b.since).map((s) => {
-      const title = lastSegment3(s.cwd);
+    const rows = sessions.filter((s) => s.status === g.status).sort((a, b) => b.since - a.since).map((s) => {
+      const folder = lastSegment3(s.cwd);
+      const known = titles.get(s.sessionId);
+      const title = known ? cut(known) : folder;
+      const subtitle = known ? known === folder ? "" : folder : s.name === folder ? "" : cut(s.name);
       const account = accounts.find((v) => v.key === s.accountKey);
       const w = where(s.kind, locate(s, liveWindows, thisWindowId, platform));
       const row = {
@@ -2282,7 +2285,7 @@ function toSessionsModel(sessions, liveWindows, accounts, thisWindowId, now, pla
         kind: s.kind,
         status: s.status,
         title,
-        subtitle: s.name === title ? "" : cut(s.name),
+        subtitle,
         accountName: account?.label ?? s.accountKey,
         isMain: account?.isMain ?? false,
         whereText: w.whereText,
@@ -2404,7 +2407,7 @@ var SessionsController = class {
     }
     const accounts = this.d.accounts();
     this.model = {
-      ...toSessionsModel(this.sessions, this.windows, accounts, this.d.thisWindowId, now, this.platform),
+      ...toSessionsModel(this.sessions, this.windows, accounts, this.d.thisWindowId, now, this.platform, new Map(this.past.map((p) => [p.sessionId, p.title]))),
       past: toPastGroups(this.past, {
         runningIds: new Set(this.sessions.map((x) => x.sessionId)),
         accounts,

@@ -35,7 +35,7 @@ test('the longest matching folder wins, and an old heartbeat without folders nev
     assert.deepEqual(locate(S({ cwd: 'C:\\q' }), [old], 'me', 'win32'), { where: 'outside' });
 });
 
-test('groups waiting, working, idle in that order, oldest first, with labels and crown', () => {
+test('groups waiting, working, idle in that order, newest first, with labels and crown', () => {
     const views = [{ key: 'main', number: 1, label: 'personal', isMain: true } as any, { key: 'a1', number: 2, label: 'work', isMain: false } as any];
     const m = toSessionsModel([
         S({ sessionId: 'i', status: 'idle', since: 1000 }),
@@ -44,10 +44,10 @@ test('groups waiting, working, idle in that order, oldest first, with labels and
         S({ sessionId: 'k', status: 'working', since: 2000, kind: 'app' }),
     ], [W('me', ['C:\\p\\a'])], views, 'me', 65_000, 'win32');
     assert.equal(m.count, 4);
-    assert.deepEqual(m.groups.map((g) => [g.heading, g.rows.map((r) => r.sessionId)]), [['Waiting for you', ['w1', 'w2']], ['Working', ['k']], ['Idle', ['i']]]);
-    const w1 = m.groups[0].rows[0];
+    assert.deepEqual(m.groups.map((g) => [g.heading, g.rows.map((r) => r.sessionId)]), [['Waiting for you', ['w2', 'w1']], ['Working', ['k']], ['Idle', ['i']]]);
+    const w1 = m.groups[0].rows[1];
     assert.deepEqual([w1.title, w1.subtitle.length, w1.subtitle.endsWith('…'), w1.accountName, w1.isMain, w1.canJump, w1.ageText, w1.whereText], ['a', 60, true, 'personal', true, true, '1m', 'Claude tab · this window']);
-    assert.equal(m.groups[0].rows[1].accountName, 'work');
+    assert.equal(m.groups[0].rows[0].accountName, 'work');
     const k = m.groups[1].rows[0];
     assert.deepEqual([k.canJump, k.note, k.whereText], [false, 'This session runs in the Claude app.', 'Claude app']);
 });
@@ -67,6 +67,16 @@ test('rows that cannot jump explain where they are', () => {
 test('a window with no safe thing to open (unsaved multi-folder workspace) is never a jump target', () => {
     const unsaved: WindowBeat = { windowId: 'other', accountKey: 'main', workspaceName: 'Untitled (Workspace)', pid: 1, updatedAt: 0, folders: ['C:\\p\\b', 'C:\\p\\c'] };
     assert.deepEqual(locate(S({ cwd: 'C:\\p\\b' }), [unsaved], 'me', 'win32'), { where: 'outside' });
+});
+
+test('a running session shows its conversation title, with its folder underneath, like finished ones', () => {
+    const m = toSessionsModel([
+        S({ sessionId: 'a', name: 'claude-away-36', since: 2 }),
+        S({ sessionId: 'b', name: 'site-2', since: 1 }),
+    ], [W('me', ['C:\p\a'])], [], 'me', 0, 'win32', new Map([['a', 'Build by the plan']]));
+    const [a, b] = m.groups[0].rows;
+    assert.deepEqual([a.title, a.subtitle], ['Build by the plan', 'a']);
+    assert.deepEqual([b.title, b.subtitle], ['a', 'site-2'], 'no known title: as before');
 });
 
 test('nothing running gives an empty model', () => {
