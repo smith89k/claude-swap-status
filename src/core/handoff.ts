@@ -38,6 +38,10 @@ export interface HandoffRequest {
     accountKey: string;
     /** close only: the process number of the editor's Claude for this conversation. */
     pid?: number;
+    /** open only: where it ran before (ide: a Claude tab, the default; terminal: `claude` in a terminal). */
+    kind?: 'ide' | 'terminal';
+    /** open, terminal only: the processes it ran under (its shell among them), to find that terminal again. */
+    shells?: number[];
     at: number;
 }
 
@@ -86,6 +90,16 @@ export function parseRequest(raw: unknown, platform: NodeJS.Platform = process.p
             return undefined;
         }
         req.pid = r.pid;
+    } else {
+        if (r.kind !== undefined && r.kind !== 'ide' && r.kind !== 'terminal') {
+            return undefined;
+        }
+        if (r.kind) {
+            req.kind = r.kind;
+        }
+        if (Array.isArray(r.shells)) {
+            req.shells = r.shells.filter((p): p is number => isNum(p) && Number.isInteger(p) && p > 0);
+        }
     }
     return req;
 }

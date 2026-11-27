@@ -138,16 +138,22 @@ export class HandoffController implements vscode.Disposable {
     /** Open the conversation again once Claude Away's copy has ended, replacing a dead tab if one is left. */
     private async open(req: HandoffRequest): Promise<HandoffOutcome> {
         let sessions = await this.running();
+        let free = false;
         for (let i = 0; i < FREE_WAIT_MS / FREE_POLL_MS; i++) {
             const holders = sessions.filter((x) => x.sessionId === req.sessionId);
             if (holders.some((x) => x.kind === 'ide')) {
                 return 'already-open'; // the user opened it in the editor meanwhile
             }
             if (!holders.length) {
+                free = true;
                 break;
             }
             await this.sleep(FREE_POLL_MS);
             sessions = await this.running();
+        }
+        if (req.kind === 'terminal') {
+            // A second `claude` on the same conversation would make two copies: only when it is free.
+            return free ? this.openInTerminal(req) : 'already-open';
         }
         const pick = await this.show(req.sessionId, sessions);
         if (pick.kind === 'existing') {
@@ -156,6 +162,24 @@ export class HandoffController implements vscode.Disposable {
             await this.sleep(SETTLE_MS);
             await vscode.commands.executeCommand(OPEN, req.sessionId);
         }
+        return 'opened';
+    }
+
+    /** Runs `claude --resume` in the terminal the conversation ran in, or in a new one in its folder. */
+    private async openInTerminal(req: HandoffRequest): Promise<HandoffOutcome> {
+        const shells = new Set(req.shells ?? []);
+        let terminal: vscode.Terminal | undefined;
+        for (const t of vscode.window.terminals) {
+            const pid = await t.processId;
+            if (pid !== undefined && shells.has(pid)) {
+                terminal = t;
+                break;
+            }
+        }
+        // A new terminal gets this window's account (Claude Swap sets it for every terminal here).
+        terminal ??= vscode.window.createTerminal({ name: 'Claude', cwd: req.cwd });
+        terminal.show();
+        terminal.sendText(`claude --resume ${req.sessionId}`); // the id is a checked UUID: safe to type
         return 'opened';
     }
 

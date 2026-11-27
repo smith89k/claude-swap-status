@@ -51,6 +51,17 @@ test('a valid request round-trips; bad ones are rejected', async () => {
     }
 });
 
+test('an open request can say the conversation ran in a terminal, and under which shells', async () => {
+    const root = await tempRoot();
+    const term: HandoffRequest = { ...open, kind: 'terminal', shells: [4100, 3900] };
+    await writeRequest(root, term);
+    assert.deepEqual(await peekRequest(root, ID, 'win32'), term);
+    assert.deepEqual(parseRequest({ ...open, kind: 'ide' }, 'win32'), { ...open, kind: 'ide' });
+    assert.equal(parseRequest({ ...open, kind: 'app' }, 'win32'), undefined, 'only ide or terminal');
+    assert.deepEqual(parseRequest({ ...term, shells: [1, 'x', -2, 7] }, 'win32')?.shells, [1, 7], 'only real process numbers');
+    assert.equal(parseRequest({ ...close, kind: 'terminal', shells: [1] }, 'win32')?.kind, undefined, 'close requests carry no kind');
+});
+
 test('freshness: close 30 s, open 5 min, and nothing from the future', () => {
     assert.equal(isFresh(close, AT + 30_000), true);
     assert.equal(isFresh(close, AT + 30_001), false);

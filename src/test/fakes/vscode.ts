@@ -184,5 +184,13 @@ export class EventEmitter<T> {
 }
 
 /** Terminals a test puts in this stand-in window. */
-export const terminals: { processId: Promise<number | undefined>; show(): void }[] = [];
+export interface FakeTerminal { processId: Promise<number | undefined>; show(): void; sendText?(text: string): void; name?: string; cwd?: string; sent?: string[] }
+export const terminals: FakeTerminal[] = [];
 Object.defineProperty(window, 'terminals', { get: () => terminals });
+
+/** A terminal the extension makes: it records what is typed into it. */
+(window as any).createTerminal = (o: { name?: string; cwd?: string }) => {
+    const t: FakeTerminal = { name: o.name, cwd: o.cwd, processId: Promise.resolve(undefined), sent: [], show() {}, sendText(text: string) { t.sent!.push(text); } };
+    terminals.push(t);
+    return t;
+};

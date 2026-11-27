@@ -8,7 +8,7 @@ import { HandoffController } from '../vscode/handoff';
 import { pendingRequests, readResult, writeRequest, type HandoffRequest } from '../core/handoff';
 import { tabLabelFor } from '../core/claudeTabs';
 import type { WindowBeat } from '../core/types';
-import { activateTab, addClaudeTab, fake, setTabs, tabState } from './fakes/vscode';
+import { activateTab, addClaudeTab, fake, setTabs, tabState, terminals } from './fakes/vscode';
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const CWD = 'C:\\p\\a\\site';
@@ -147,6 +147,41 @@ test('open: already reopened by the user', async () => {
     await c.handleAll();
     assert.equal(opens(), 0);
     assert.deepEqual(tabState.closed, []);
+    assert.equal((await readResult(root, ID))?.result, 'already-open');
+});
+
+test('open in a terminal: the terminal it ran in runs claude --resume again', async () => {
+    const { c, root, ask, opens } = await setup();
+    terminals.length = 0;
+    const sent: string[] = [];
+    let shown = 0;
+    terminals.push({ processId: Promise.resolve(700), show() {}, sendText: () => undefined });
+    terminals.push({ processId: Promise.resolve(900), show: () => void shown++, sendText: (t) => void sent.push(t) });
+    await ask({ action: 'open', kind: 'terminal', shells: [901, 900] });
+    await c.handleAll();
+    assert.deepEqual(sent, [`claude --resume ${ID}`]);
+    assert.equal(shown, 1);
+    assert.equal(opens(), 0, 'no Claude tab');
+    assert.equal(terminals.length, 2, 'no new terminal');
+    assert.equal((await readResult(root, ID))?.result, 'opened');
+});
+
+test('open in a terminal that is gone: a new terminal in the folder', async () => {
+    const { c, root, ask } = await setup();
+    terminals.length = 0;
+    await ask({ action: 'open', kind: 'terminal', shells: [901] });
+    await c.handleAll();
+    assert.equal(terminals.length, 1);
+    assert.deepEqual([terminals[0].name, terminals[0].cwd, terminals[0].sent], ['Claude', CWD, [`claude --resume ${ID}`]]);
+    assert.equal((await readResult(root, ID))?.result, 'opened');
+});
+
+test('open in a terminal while the conversation still runs somewhere: left alone, never two copies', async () => {
+    const { c, root, ask } = await setup({ sessions: [{ entrypoint: 'cli' }] });
+    terminals.length = 0;
+    await ask({ action: 'open', kind: 'terminal', shells: [901] });
+    await c.handleAll();
+    assert.equal(terminals.length, 0);
     assert.equal((await readResult(root, ID))?.result, 'already-open');
 });
 
