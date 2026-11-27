@@ -327,7 +327,7 @@ var Registry = class {
       if (!found) {
         throw new Error(`No account ${id}`);
       }
-      for (const key of ["email", "orgUuid", "orgName", "alias"]) {
+      for (const key of ["email", "orgUuid", "orgName", "alias", "icon"]) {
         if (!(key in patch)) {
           continue;
         }
@@ -377,6 +377,31 @@ var MAIN_KEY = "main";
 // src/vscode/accountsPanel.ts
 var vscode = __toESM(require("vscode"));
 var import_node_crypto3 = require("node:crypto");
+
+// src/core/accountIcons.ts
+var svg = (d, evenOdd = false) => `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor"${evenOdd ? ' fill-rule="evenodd"' : ""} d="${d}"/></svg>`;
+var ACCOUNT_ICONS = [
+  { id: "star", label: "Star", codicon: "star-full", svg: svg("M8 1.2l2.1 4.3 4.7.7-3.4 3.3.8 4.7L8 12l-4.2 2.2.8-4.7-3.4-3.3 4.7-.7z") },
+  { id: "heart", label: "Heart", codicon: "heart", svg: svg("M8 14.2 2.3 8.6a3.6 3.6 0 0 1 5.1-5.1l.6.6.6-.6a3.6 3.6 0 0 1 5.1 5.1z") },
+  { id: "rocket", label: "Rocket", codicon: "rocket", svg: svg("M14.6 1.4c.2 3.3-1.2 6-4 8.2l.4 3.1-2.4 2-1-2.9-3.4-3.4-2.9-1 2-2.4 3.1.4c2.2-2.8 4.9-4.2 8.2-4zM10.7 4a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6zM3.4 10.6l2 2c-.6 1-1.8 1.7-3.6 2 .3-1.8 1-3 1.6-4z") },
+  { id: "flame", label: "Flame", codicon: "flame", svg: svg("M8.2 1c.6 2.5 4.6 4.3 4.6 8.4a4.8 4.8 0 0 1-9.6 0c0-1.9 1-3.2 2-4.1-.1 1.5.6 2.5 1.6 2.8C6.6 5.8 7.4 3.2 8.2 1z") },
+  { id: "bolt", label: "Lightning bolt", codicon: "zap", svg: svg("M9.6 1 3 9h4.2l-1 6L13 7H8.7z") },
+  { id: "briefcase", label: "Briefcase", codicon: "briefcase", svg: svg("M5.5 2.5h5v2H14a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1h3.5zm1 1v1h3v-1zM1 8.5h14v1H1z", true) },
+  { id: "home", label: "House", codicon: "home", svg: svg("M8 1.5 1 7.6h2V14h3.5v-4h3v4H13V7.6h2z") },
+  { id: "coffee", label: "Coffee cup", codicon: "coffee", svg: svg("M2 5.5h9V10a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4zM11 6.5h1.3a2.1 2.1 0 0 1 0 4.2H11V9.5h1.3a.9.9 0 0 0 0-1.8H11zM4.5 1h1v3h-1zM7 1h1v3H7z") },
+  { id: "flask", label: "Flask", codicon: "beaker", svg: svg("M5.5 1.5h5v1h-1v4l4.3 6.6a1 1 0 0 1-.8 1.4H3a1 1 0 0 1-.8-1.4l4.3-6.6v-4h-1z") },
+  { id: "gem", label: "Gem", codicon: "ruby", svg: svg("M4 2h8l3 4-7 8.5L1 6z") }
+];
+function iconPrefix(isMain, id) {
+  if (isMain) {
+    return "\u{1F451} ";
+  }
+  const icon2 = accountIcon(id);
+  return icon2 ? `$(${icon2.codicon}) ` : "";
+}
+function accountIcon(id) {
+  return id ? ACCOUNT_ICONS.find((i) => i.id === id) : void 0;
+}
 
 // src/core/format.ts
 function progressBar(pct) {
@@ -535,6 +560,9 @@ function toAccount(v, now) {
   } else if (!v.isThisWindow) {
     actions.push("use");
   }
+  if (v.signedIn && !v.isMain) {
+    actions.push("icon");
+  }
   if (v.signedIn || v.isMain) {
     actions.push("rename");
   }
@@ -552,6 +580,10 @@ function toAccount(v, now) {
   };
   if (v.isMain) {
     a.removeNote = MAIN_REMOVE_NOTE;
+  }
+  const icon2 = v.isMain ? void 0 : accountIcon(v.icon);
+  if (icon2) {
+    a.icon = { svg: icon2.svg, label: icon2.label };
   }
   if (v.email) {
     a.email = v.email;
@@ -584,10 +616,12 @@ var ACTION_COMMANDS = {
   use: "claudeSwap.useInThisWindow",
   signIn: "claudeSwap.signInAgain",
   signInAgain: "claudeSwap.signInAgain",
+  icon: "claudeSwap.changeAccountIcon",
   rename: "claudeSwap.renameAccount",
   remove: "claudeSwap.removeAccount",
   add: "claudeSwap.addAccount",
-  refresh: "claudeSwap.refreshStatus"
+  refresh: "claudeSwap.refreshStatus",
+  reload: "claudeSwap.reloadWindow"
 };
 var AccountsPanelProvider = class {
   constructor(extensionUri, controller2, sessions) {
@@ -850,7 +884,7 @@ function registerCommands(context, c) {
   };
   const pickAccount = async (placeHolder, filter = () => true) => {
     const items = c.views.filter(filter).map((v) => ({
-      label: `${v.isThisWindow ? "$(check) " : ""}${v.isMain ? "\u{1F451} " : ""}${v.label}`,
+      label: `${v.isThisWindow ? "$(check) " : ""}${iconPrefix(v.isMain, v.icon)}${v.label}`,
       description: v.email && v.email !== v.label ? v.email : void 0,
       detail: usageSummary(v),
       view: v
@@ -881,9 +915,14 @@ function registerCommands(context, c) {
     await context.workspaceState.update(WINDOW_ACCOUNT_KEY, key);
     await vscode3.commands.executeCommand("workbench.action.reloadWindow");
   };
+  reg("claudeSwap.reloadWindow", async () => {
+    if (await confirmReload("Reload this window? Anything Claude is doing in this window will stop.")) {
+      await vscode3.commands.executeCommand("workbench.action.reloadWindow");
+    }
+  });
   reg("claudeSwap.switchAccount", async () => {
     const items = c.views.map((v) => ({
-      label: `${v.isThisWindow ? "$(check) " : ""}${v.isMain ? "\u{1F451} " : ""}${v.label}`,
+      label: `${v.isThisWindow ? "$(check) " : ""}${iconPrefix(v.isMain, v.icon)}${v.label}`,
       description: v.email && v.email !== v.label ? v.email : void 0,
       detail: [usageSummary(v), v.usedBy.length ? `open in ${v.usedBy.join(", ")}` : ""].filter(Boolean).join("   \xB7   "),
       run: () => switchTo(v.key, v.label)
@@ -943,6 +982,28 @@ function registerCommands(context, c) {
     } else {
       await c.registry.update(v.key, { alias: value.trim() });
     }
+    await c.refresh(true);
+  });
+  reg("claudeSwap.changeAccountIcon", async (arg) => {
+    const v = viewFor(arg) ?? await pickAccount("Pick an account to change its icon", (x) => !x.isMain);
+    if (!v) {
+      return;
+    }
+    if (v.isMain) {
+      void vscode3.window.showInformationMessage("The main account always wears the crown.");
+      return;
+    }
+    const items = ACCOUNT_ICONS.map((i) => ({
+      label: `$(${i.codicon}) ${i.label}`,
+      description: i.id === v.icon ? "current" : void 0,
+      icon: i.id
+    }));
+    items.push({ label: "$(circle-slash) No icon", description: v.icon ? void 0 : "current", icon: "" });
+    const pick = await vscode3.window.showQuickPick(items, { placeHolder: `Pick an icon for "${v.label}"` });
+    if (!pick) {
+      return;
+    }
+    await c.registry.update(v.key, { icon: pick.icon });
     await c.refresh(true);
   });
   reg("claudeSwap.removeAccount", async (arg) => {
@@ -1258,6 +1319,9 @@ function buildSnapshot(i) {
     }
     if (a.orgName) {
       v.orgName = a.orgName;
+    }
+    if (accountIcon(a.icon)) {
+      v.icon = a.icon;
     }
     if (i.usage[a.id]) {
       v.entry = i.usage[a.id];
@@ -1752,7 +1816,11 @@ var AccountsController = class {
 // src/vscode/statusBar.ts
 var vscode5 = __toESM(require("vscode"));
 function icon(view) {
-  return view.isMain ? "\u{1F451}" : "$(account)";
+  if (view.isMain) {
+    return "\u{1F451}";
+  }
+  const chosen = accountIcon(view.icon);
+  return chosen ? `$(${chosen.codicon})` : "$(account)";
 }
 var StatusBar = class {
   item = vscode5.window.createStatusBarItem(vscode5.StatusBarAlignment.Left, 100);
@@ -1781,17 +1849,17 @@ var StatusBar = class {
     const found = pickUsage(view.entry, now);
     let five = "N/A";
     let seven = "N/A";
-    const lines = [view.isMain ? "Main Claude account (\u{1F451}) for this window" : "Claude account for this window"];
+    const lines2 = [view.isMain ? "Main Claude account (\u{1F451}) for this window" : "Claude account for this window"];
     if (view.email) {
-      lines.push(`Email: ${view.email}`);
+      lines2.push(`Email: ${view.email}`);
     }
     if (view.orgName) {
-      lines.push(`Organisation: ${view.orgName}`);
+      lines2.push(`Organisation: ${view.orgName}`);
     }
     if (view.entry?.plan) {
-      lines.push(`Plan: ${view.entry.plan}`);
+      lines2.push(`Plan: ${view.entry.plan}`);
     }
-    lines.push(`Status: ${statusLabel(status)}`);
+    lines2.push(`Status: ${statusLabel(status)}`);
     if (found) {
       const u = found.usage;
       if (u.fiveHour) {
@@ -1800,9 +1868,9 @@ var StatusBar = class {
       if (u.sevenDay) {
         seven = formatWindow(u.sevenDay, now);
       }
-      lines.push(formatResetDetail("5h", u.fiveHour, now), formatResetDetail("7d", u.sevenDay, now));
+      lines2.push(formatResetDetail("5h", u.fiveHour, now), formatResetDetail("7d", u.sevenDay, now));
       if (found.stale) {
-        lines.push(`Showing last known usage from ${formatAge(found.ageSeconds)} ago.`);
+        lines2.push(`Showing last known usage from ${formatAge(found.ageSeconds)} ago.`);
       }
       const level = usageLevel(u);
       if (level === "error") {
@@ -1818,9 +1886,9 @@ var StatusBar = class {
     if (!this.item.backgroundColor && needsAttention(status)) {
       this.item.backgroundColor = new vscode5.ThemeColor("statusBarItem.warningBackground");
     }
-    lines.push("Click to switch accounts.");
+    lines2.push("Click to switch accounts.");
     this.item.text = `${icon(view)} ${view.label} | 5h: ${five} | 7d: ${seven}${found?.stale ? " $(history)" : ""}`;
-    this.item.tooltip = lines.join("\n");
+    this.item.tooltip = lines2.join("\n");
   }
   dispose() {
     this.item.dispose();
@@ -1830,8 +1898,8 @@ var StatusBar = class {
 // src/vscode/sessions.ts
 var vscode6 = __toESM(require("vscode"));
 var import_node_fs3 = require("node:fs");
-var import_promises11 = require("node:fs/promises");
-var path12 = __toESM(require("node:path"));
+var import_promises12 = require("node:fs/promises");
+var path13 = __toESM(require("node:path"));
 
 // src/core/jumpRequests.ts
 var import_promises9 = require("node:fs/promises");
@@ -1895,10 +1963,180 @@ async function ancestors(pid, levels, platform, run = defaultRunner) {
   return out;
 }
 
-// src/core/sessions.ts
+// src/core/pastSessions.ts
 var import_promises10 = require("node:fs/promises");
 var path11 = __toESM(require("node:path"));
+var PAST_DAYS = 30;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var HEAD_BYTES = 64 * 1024;
+var TAIL_BYTES = 128 * 1024;
+var PROMPT_LIMIT = 60;
+function lines(text, dropFirst, dropLast) {
+  const parts = text.split("\n");
+  if (dropFirst) {
+    parts.shift();
+  }
+  if (dropLast) {
+    parts.pop();
+  }
+  const out = [];
+  for (const line of parts) {
+    if (!line.trim()) {
+      continue;
+    }
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+    }
+  }
+  return out;
+}
+function promptText(entry) {
+  if (entry?.type !== "user" || entry.isMeta || entry.isSidechain) {
+    return void 0;
+  }
+  const content = entry.message?.content;
+  let text;
+  if (typeof content === "string") {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content.find((p) => p?.type === "text" && typeof p.text === "string")?.text;
+  }
+  const first = text?.trim().split(/\r?\n/)[0]?.trim();
+  if (!first || first.startsWith("<")) {
+    return void 0;
+  }
+  return first.length > PROMPT_LIMIT ? first.slice(0, PROMPT_LIMIT - 1) + "\u2026" : first;
+}
+function parseTranscript(head, tail, headIsWhole, tailIsWhole) {
+  const info = {};
+  for (const e of lines(head, false, !headIsWhole)) {
+    if (!info.cwd && typeof e?.cwd === "string" && e.cwd) {
+      info.cwd = e.cwd;
+    }
+    if (!info.entrypoint && typeof e?.entrypoint === "string") {
+      info.entrypoint = e.entrypoint;
+    }
+    if (!info.firstPrompt) {
+      info.firstPrompt = promptText(e);
+    }
+    if (e?.type === "custom-title" && typeof e.customTitle === "string" && e.customTitle) {
+      info.customTitle = e.customTitle;
+    }
+    if (e?.type === "ai-title" && typeof e.aiTitle === "string" && e.aiTitle) {
+      info.aiTitle = e.aiTitle;
+    }
+  }
+  for (const e of lines(tail, !tailIsWhole, false)) {
+    if (e?.type === "custom-title" && typeof e.customTitle === "string" && e.customTitle) {
+      info.customTitle = e.customTitle;
+    }
+    if (e?.type === "ai-title" && typeof e.aiTitle === "string" && e.aiTitle) {
+      info.aiTitle = e.aiTitle;
+    }
+  }
+  return info;
+}
+function lastSegment(p) {
+  const parts = p.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
 function kindOf(entrypoint) {
+  if (entrypoint === "claude-vscode") {
+    return "ide";
+  }
+  if (entrypoint === "claude-desktop") {
+    return "app";
+  }
+  return "terminal";
+}
+async function readEnds(file, size) {
+  const fh = await (0, import_promises10.open)(file, "r");
+  try {
+    const headLen = Math.min(size, HEAD_BYTES);
+    const head = Buffer.alloc(headLen);
+    await fh.read(head, 0, headLen, 0);
+    if (size <= HEAD_BYTES) {
+      const text = head.toString("utf8");
+      return { head: text, tail: "", headIsWhole: true, tailIsWhole: true };
+    }
+    const tailLen = Math.min(size, TAIL_BYTES);
+    const tail = Buffer.alloc(tailLen);
+    await fh.read(tail, 0, tailLen, size - tailLen);
+    return { head: head.toString("utf8"), tail: tail.toString("utf8"), headIsWhole: false, tailIsWhole: tailLen === size };
+  } finally {
+    await fh.close();
+  }
+}
+var PastSessionReader = class {
+  cache = /* @__PURE__ */ new Map();
+  /** How many transcripts were actually opened on the last list() call (for tests). */
+  lastReads = 0;
+  async list(sources, now, days = PAST_DAYS) {
+    const cutoff = now - days * DAY_MS;
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    this.lastReads = 0;
+    for (const src of sources) {
+      const root = path11.join(src.configHome, "projects");
+      let folders;
+      try {
+        folders = (await (0, import_promises10.readdir)(root, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+      } catch {
+        continue;
+      }
+      for (const folder of folders) {
+        let names;
+        try {
+          names = (await (0, import_promises10.readdir)(path11.join(root, folder), { withFileTypes: true })).filter((d) => d.isFile() && d.name.endsWith(".jsonl")).map((d) => d.name);
+        } catch {
+          continue;
+        }
+        for (const name of names) {
+          const file = path11.join(root, folder, name);
+          try {
+            const st = await (0, import_promises10.stat)(file);
+            if (st.mtimeMs < cutoff) {
+              continue;
+            }
+            seen.add(file);
+            let hit = this.cache.get(file);
+            if (!hit || hit.mtimeMs !== st.mtimeMs || hit.size !== st.size) {
+              const ends = await readEnds(file, st.size);
+              this.lastReads++;
+              hit = { mtimeMs: st.mtimeMs, size: st.size, info: parseTranscript(ends.head, ends.tail, ends.headIsWhole, ends.tailIsWhole) };
+              this.cache.set(file, hit);
+            }
+            const info = hit.info;
+            if (!info.cwd) {
+              continue;
+            }
+            out.push({
+              sessionId: name.slice(0, -".jsonl".length),
+              cwd: info.cwd,
+              title: info.customTitle ?? info.aiTitle ?? info.firstPrompt ?? lastSegment(info.cwd),
+              kind: kindOf(info.entrypoint),
+              lastActive: st.mtimeMs,
+              accountKey: src.accountKey
+            });
+          } catch {
+          }
+        }
+      }
+    }
+    for (const key of this.cache.keys()) {
+      if (!seen.has(key)) {
+        this.cache.delete(key);
+      }
+    }
+    return out;
+  }
+};
+
+// src/core/sessions.ts
+var import_promises11 = require("node:fs/promises");
+var path12 = __toESM(require("node:path"));
+function kindOf2(entrypoint) {
   if (entrypoint === "claude-vscode") {
     return "ide";
   }
@@ -1916,7 +2154,7 @@ function statusOf(status) {
   }
   return "idle";
 }
-function lastSegment(p) {
+function lastSegment2(p) {
   const parts = p.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? p;
 }
@@ -1924,10 +2162,10 @@ var num = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
 async function listSessions(sources, isAlive = isPidAlive) {
   const out = [];
   for (const src of sources) {
-    const dir = path11.join(src.configHome, "sessions");
+    const dir = path12.join(src.configHome, "sessions");
     let names;
     try {
-      names = await (0, import_promises10.readdir)(dir);
+      names = await (0, import_promises11.readdir)(dir);
     } catch {
       continue;
     }
@@ -1937,7 +2175,7 @@ async function listSessions(sources, isAlive = isPidAlive) {
       }
       let raw;
       try {
-        raw = await readJson(path11.join(dir, name));
+        raw = await readJson(path12.join(dir, name));
       } catch {
         continue;
       }
@@ -1951,8 +2189,8 @@ async function listSessions(sources, isAlive = isPidAlive) {
         pid: raw.pid,
         sessionId: raw.sessionId,
         cwd: raw.cwd,
-        name: typeof raw.name === "string" && raw.name ? raw.name : lastSegment(raw.cwd),
-        kind: kindOf(raw.entrypoint),
+        name: typeof raw.name === "string" && raw.name ? raw.name : lastSegment2(raw.cwd),
+        kind: kindOf2(raw.entrypoint),
         status: statusOf(raw.status),
         since: num(raw.statusUpdatedAt) ?? num(raw.updatedAt) ?? num(raw.startedAt) ?? 0,
         accountKey: src.accountKey
@@ -1966,6 +2204,9 @@ async function listSessions(sources, isAlive = isPidAlive) {
 var NOTE_APP = "This session runs in the Claude app.";
 var NOTE_OUTSIDE_TERMINAL = "This session runs in a terminal outside the editor.";
 var NOTE_UNREACHABLE_WINDOW = "This session runs in a window that can't be reached. Reload that window, then try again.";
+var NOTE_PAST_APP = "This conversation was in the Claude app. Reopen it there.";
+var notePastAccount = (account) => `This conversation belongs to ${account}. Switch this window to ${account} to reopen it.`;
+var notePastFolder = (folder) => `This conversation is from the ${folder} folder. Open that folder to reopen it.`;
 var NAME_LIMIT = 60;
 var GROUPS = [
   { status: "waiting", heading: "Waiting for you" },
@@ -1977,6 +2218,9 @@ function norm(p, platform) {
     return p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
   }
   return p.replace(/\/+$/, "");
+}
+function samePath(a, b, platform = process.platform) {
+  return norm(a, platform) === norm(b, platform);
 }
 function isUnder(child, folder, platform = process.platform) {
   const c = norm(child, platform);
@@ -2005,7 +2249,7 @@ function locate(s, liveWindows, thisWindowId, platform = process.platform) {
   const openTarget = best.window.openTarget;
   return openTarget ? { where: "otherWindow", windowId: best.window.windowId, openTarget } : { where: "outside" };
 }
-function lastSegment2(p) {
+function lastSegment3(p) {
   const parts = p.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? p;
 }
@@ -2029,7 +2273,7 @@ function toSessionsModel(sessions, liveWindows, accounts, thisWindowId, now, pla
   const groups = [];
   for (const g of GROUPS) {
     const rows = sessions.filter((s) => s.status === g.status).sort((a, b) => a.since - b.since).map((s) => {
-      const title = lastSegment2(s.cwd);
+      const title = lastSegment3(s.cwd);
       const account = accounts.find((v) => v.key === s.accountKey);
       const w = where(s.kind, locate(s, liveWindows, thisWindowId, platform));
       const row = {
@@ -2048,17 +2292,78 @@ function toSessionsModel(sessions, liveWindows, accounts, thisWindowId, now, pla
       if (w.note) {
         row.note = w.note;
       }
+      withIcon(row, account);
       return row;
     });
     if (rows.length) {
       groups.push({ status: g.status, heading: g.heading, rows });
     }
   }
-  return { count: sessions.length, groups };
+  return { count: sessions.length, groups, past: [] };
+}
+function withIcon(row, account) {
+  const icon2 = account && !account.isMain ? accountIcon(account.icon) : void 0;
+  if (icon2) {
+    row.accountIcon = icon2.svg;
+  }
+}
+var DAY_GROUPS = ["Today", "Yesterday", "Earlier this week", "Older"];
+function dayGroup(at, now) {
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const start = midnight.getTime();
+  if (at >= start) {
+    return 0;
+  }
+  const days = Math.ceil((start - at) / (24 * 60 * 60 * 1e3));
+  return days <= 1 ? 1 : days <= 6 ? 2 : 3;
+}
+function canReopen(p, accountName, ctx) {
+  const platform = ctx.platform ?? process.platform;
+  if (p.kind === "app") {
+    return { canJump: false, note: NOTE_PAST_APP };
+  }
+  if (p.accountKey !== ctx.thisAccountKey) {
+    return { canJump: false, note: notePastAccount(accountName) };
+  }
+  if (!ctx.thisFolders.some((f) => samePath(p.cwd, f, platform))) {
+    return { canJump: false, note: notePastFolder(lastSegment3(p.cwd)) };
+  }
+  return { canJump: true };
+}
+function toPastGroups(past, ctx) {
+  const buckets = DAY_GROUPS.map(() => []);
+  const sorted = past.filter((p) => !ctx.runningIds.has(p.sessionId)).sort((a, b) => b.lastActive - a.lastActive);
+  for (const p of sorted) {
+    const account = ctx.accounts.find((v) => v.key === p.accountKey);
+    const accountName = account?.label ?? p.accountKey;
+    const folder = lastSegment3(p.cwd);
+    const r = canReopen(p, accountName, ctx);
+    const row = {
+      sessionId: p.sessionId,
+      pid: 0,
+      kind: p.kind,
+      status: "finished",
+      title: cut(p.title),
+      subtitle: p.title === folder ? "" : folder,
+      accountName,
+      isMain: account?.isMain ?? false,
+      whereText: p.kind === "app" ? "Claude app" : p.kind === "ide" ? "Claude tab" : "terminal",
+      ageText: formatAge(Math.max(0, Math.round((ctx.now - p.lastActive) / 1e3))) + " ago",
+      canJump: r.canJump
+    };
+    if (r.note) {
+      row.note = r.note;
+    }
+    withIcon(row, account);
+    buckets[dayGroup(p.lastActive, ctx.now)].push(row);
+  }
+  return DAY_GROUPS.map((heading, i) => ({ status: "finished", heading, rows: buckets[i] })).filter((g) => g.rows.length);
 }
 
 // src/vscode/sessions.ts
 var VISIBLE_POLL_MS = 3e3;
+var PAST_POLL_MS = 3e4;
 var REQUEST_POLL_MS = 2e3;
 var TERMINAL_LEVELS = 3;
 var SessionsController = class {
@@ -2069,19 +2374,50 @@ var SessionsController = class {
   }
   emitter = new vscode6.EventEmitter();
   onDidChange = this.emitter.event;
-  model = { count: 0, groups: [] };
+  model = { count: 0, groups: [], past: [] };
   sessions = [];
+  past = [];
   platform;
   now;
   pollTimer;
   requestTimer;
   watcher;
   windows = [];
-  async refresh() {
-    this.sessions = await listSessions(await this.d.sources(), this.d.isAlive ?? isPidAlive);
+  pastReader = new PastSessionReader();
+  pastAt;
+  /** Re-reads running sessions; finished ones too when 30 seconds have passed, or right away with `forcePast`. */
+  async refresh(forcePast = false) {
+    if (forcePast) {
+      this.pastAt = void 0;
+    }
+    const sources = await this.d.sources();
+    this.sessions = await listSessions(sources, this.d.isAlive ?? isPidAlive);
     this.windows = [...await this.d.liveWindows()];
-    this.model = toSessionsModel(this.sessions, this.windows, this.d.accounts(), this.d.thisWindowId, this.now(), this.platform);
+    const now = this.now();
+    if (this.pastAt === void 0 || now - this.pastAt >= PAST_POLL_MS) {
+      this.pastAt = now;
+      try {
+        this.past = await this.pastReader.list(sources, now);
+      } catch (e) {
+        this.d.log.warn(`past sessions: ${e?.code ?? e?.name ?? "error"}`);
+      }
+    }
+    const accounts = this.d.accounts();
+    this.model = {
+      ...toSessionsModel(this.sessions, this.windows, accounts, this.d.thisWindowId, now, this.platform),
+      past: toPastGroups(this.past, {
+        runningIds: new Set(this.sessions.map((x) => x.sessionId)),
+        accounts,
+        thisAccountKey: accounts.find((v) => v.isThisWindow)?.key,
+        thisFolders: this.thisFolders(),
+        now,
+        platform: this.platform
+      })
+    };
     this.emitter.fire(this.model);
+  }
+  thisFolders() {
+    return this.d.thisFolders?.() ?? this.windows.find((w) => w.windowId === this.d.thisWindowId)?.folders ?? [];
   }
   /** Re-read every 3 seconds while the panel is visible; stop while it is hidden. */
   setVisible(visible) {
@@ -2103,7 +2439,7 @@ var SessionsController = class {
       s = this.sessions.find((x) => x.sessionId === sessionId);
     }
     if (!s) {
-      return "missing";
+      return this.reopen(sessionId);
     }
     const live = await this.d.liveWindows();
     const place = locate(s, this.windows.length ? this.windows : live, this.d.thisWindowId, this.platform);
@@ -2126,6 +2462,25 @@ var SessionsController = class {
     }
     return "noted";
   }
+  /** A finished session: reopen it in a Claude tab here, or say why it can't be. */
+  async reopen(sessionId) {
+    const row = this.model.past.flatMap((g) => g.rows).find((r) => r.sessionId === sessionId);
+    if (!row) {
+      return "missing";
+    }
+    if (!row.canJump) {
+      if (row.note) {
+        void vscode6.window.showInformationMessage(row.note);
+      }
+      return "noted";
+    }
+    try {
+      await vscode6.commands.executeCommand("claude-vscode.editor.open", sessionId);
+    } catch {
+      void vscode6.window.showWarningMessage("Couldn't reopen that Claude conversation here.");
+    }
+    return "opened";
+  }
   /** Picks up a request another window left for this one, and acts on it. */
   async handleRequest() {
     const req = await takeJumpRequest(this.d.root, this.d.thisWindowId, this.now());
@@ -2134,8 +2489,8 @@ var SessionsController = class {
     }
   }
   startWatching() {
-    const dir = path12.join(this.d.root, "requests");
-    void (0, import_promises11.mkdir)(dir, { recursive: true }).then(() => {
+    const dir = path13.join(this.d.root, "requests");
+    void (0, import_promises12.mkdir)(dir, { recursive: true }).then(() => {
       try {
         this.watcher = (0, import_node_fs3.watch)(dir, () => void this.handleRequest().catch(() => void 0));
       } catch (e) {
@@ -2247,8 +2602,7 @@ async function activate(context) {
   context.subscriptions.push(
     c,
     statusBar,
-    c.onDidChange((views) => statusBar.update(views)),
-    vscode8.commands.registerCommand("claudeSwap.refreshStatus", () => c.refresh(true))
+    c.onDidChange((views) => statusBar.update(views))
   );
   registerCommands(context, c);
   const sessions = new SessionsController({
@@ -2260,6 +2614,7 @@ async function activate(context) {
     ],
     liveWindows: () => c.windows.live(),
     accounts: () => c.views,
+    thisFolders: () => (vscode8.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
     log
   });
   context.subscriptions.push(
@@ -2283,6 +2638,12 @@ async function activate(context) {
       }
     })
   );
+  context.subscriptions.push(vscode8.commands.registerCommand("claudeSwap.refreshStatus", async () => {
+    await Promise.all([
+      c.refresh(true),
+      sessions.refresh(true).catch((e) => log.warn(`sessions refresh: ${e?.name ?? "error"}`))
+    ]);
+  }));
   sessions.startWatching();
   const panel = new AccountsPanelProvider(context.extensionUri, c, sessions);
   context.subscriptions.push(panel, vscode8.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel));

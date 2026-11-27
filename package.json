@@ -50,6 +50,11 @@
         "category": "Claude Swap"
       },
       {
+        "command": "claudeSwap.changeAccountIcon",
+        "title": "Change Account Icon",
+        "category": "Claude Swap"
+      },
+      {
         "command": "claudeSwap.renameAccount",
         "title": "Rename Account",
         "category": "Claude Swap"
@@ -67,6 +72,11 @@
       {
         "command": "claudeSwap.openPanel",
         "title": "Open Accounts Panel",
+        "category": "Claude Swap"
+      },
+      {
+        "command": "claudeSwap.reloadWindow",
+        "title": "Reload Window",
         "category": "Claude Swap"
       },
       {

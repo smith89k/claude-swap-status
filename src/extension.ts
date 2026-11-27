@@ -37,7 +37,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
         c,
         statusBar,
         c.onDidChange((views) => statusBar.update(views)),
-        vscode.commands.registerCommand('claudeSwap.refreshStatus', () => c.refresh(true)),
     );
     registerCommands(context, c);
 
@@ -51,6 +50,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
         ],
         liveWindows: () => c.windows.live(),
         accounts: () => c.views,
+        thisFolders: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
         log,
     });
     context.subscriptions.push(
@@ -74,6 +74,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
             }
         }),
     );
+    // Refresh: usage numbers, running sessions and finished sessions, all at once.
+    context.subscriptions.push(vscode.commands.registerCommand('claudeSwap.refreshStatus', async () => {
+        await Promise.all([
+            c.refresh(true),
+            sessions.refresh(true).catch((e) => log.warn(`sessions refresh: ${e?.name ?? 'error'}`)),
+        ]);
+    }));
     sessions.startWatching();
 
     const panel = new AccountsPanelProvider(context.extensionUri, c, sessions);

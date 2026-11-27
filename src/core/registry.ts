@@ -14,7 +14,7 @@ interface RegistryFile {
     mainAlias?: string;
 }
 
-export type AccountPatch = { email?: string; orgUuid?: string; orgName?: string; alias?: string };
+export type AccountPatch = { email?: string; orgUuid?: string; orgName?: string; alias?: string; icon?: string };
 
 /**
  * The number each account shows as ("Claude 2"). Saved numbers are kept; accounts saved
@@ -125,7 +125,7 @@ export class Registry {
             if (!found) {
                 throw new Error(`No account ${id}`);
             }
-            for (const key of ['email', 'orgUuid', 'orgName', 'alias'] as const) {
+            for (const key of ['email', 'orgUuid', 'orgName', 'alias', 'icon'] as const) {
                 if (!(key in patch)) {
                     continue;
                 }

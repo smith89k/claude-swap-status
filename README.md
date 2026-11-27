@@ -42,6 +42,7 @@ It is published on [Open VSX](https://open-vsx.org/extension/smith89k/claude-swa
 
 - Your normal Claude login is your **main account**, marked with a crown 👑. It starts as **Claude 1**, and every window uses it until you pick something else.
 - Accounts you add start as **Claude 2**, **Claude 3**, and so on. You can rename any account, the main one included, and the new name replaces the starting one.
+- Accounts you add can wear an icon too, so you can tell them apart at a glance. Pick one of 10 (star, heart, rocket, flame, lightning bolt, briefcase, house, coffee cup, flask or gem) with the star button on the account's card, or with **Claude Swap: Change Account Icon**. The crown always stays with the main account.
 - Each extra account gets its own Claude folder inside `~/.claude-accounts`.
 - Each window remembers which account it uses. When the window opens, the extension tells Claude in that window to use that account's folder, before Claude starts. Terminals in that window get the same account.
 - Your settings, plugins, skills, memory and chat history are shared with every account. Only the login is different.
@@ -80,13 +81,22 @@ The side panel has two tabs: **Accounts** and **Sessions**. The Sessions tab lis
   - In the Claude app or a terminal outside the editor, the row only tells you where it is. The extension never opens a new window to get there.
 - The list updates every few seconds while the side panel is open.
 
+### All or Active
+
+A switch at the top of the Sessions tab picks what to show:
+
+- **Active** (the default) lists only the sessions that are running.
+- **All** lists the running ones first, then finished sessions from the last 30 days, grouped as **Today**, **Yesterday**, **Earlier this week** and **Older**. A finished session has a hollow dot.
+- **Click a finished session to reopen it** in a Claude tab in this window. This works when the session was made in this window's folder with this window's account. Otherwise, the row tells you what to do: switch the window's account, open that folder, or reopen it in the Claude app.
+- The panel remembers your choice. Finished sessions are only read, never changed.
+
 ## The status bar
 
 ```text
 👤 work | 5h: █░░░░ 25% R:3h12m | 7d: █░░░░ 16% R:1d4h
 ```
 
-- The main account shows 👑 instead of 👤.
+- The main account shows 👑 instead of 👤. An added account with an icon shows its icon instead.
 - **5h** is your 5-hour usage limit, and **7d** is your weekly limit.
 - **R:** is how long until that limit resets (`45m`, `3h12m`, `1d4h`).
 - Hover over it to see the email, plan and exact reset times.
@@ -111,8 +121,10 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **Claude Swap
 | `Claude Swap: Use Account in This Window`     | Same as Switch Account, without the extra menu items.     |
 | `Claude Swap: Switch This Window to the Main Account` | Put this window back on your normal login.   |
 | `Claude Swap: Rename Account`                 | Give an account a new name, like "work".                 |
+| `Claude Swap: Change Account Icon`            | Pick an icon for an added account, or take it off.       |
 | `Claude Swap: Delete Account`                 | Delete an account you no longer use.                      |
-| `Claude Swap: Refresh Usage`                  | Update the usage numbers right now.                       |
+| `Claude Swap: Refresh Usage`                  | Update the usage numbers and the session lists right now. |
+| `Claude Swap: Reload Window`                  | Reload this window, like switching accounts does. Also the button at the top right of the panel. |
 | `Claude Swap: Open Accounts Panel`            | Show the side panel.                                      |
 | `Claude Swap: Jump to a Claude Session`       | Pick a running Claude session and jump to it.             |
 

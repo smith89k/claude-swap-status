@@ -39,3 +39,14 @@ test('the main account can be renamed too; accounts saved without a number still
     assert.equal(v[1].signedIn, false);
     assert.equal(v[1].isThisWindow, true);
 });
+
+test('a known icon reaches the view; an unknown one is dropped', () => {
+    const v = buildSnapshot({
+        accounts: [{ id: 'a1', folder: '/r', createdAt: 't', icon: 'heart' }, { id: 'a2', folder: '/r2', createdAt: 't', icon: 'unicorn' }],
+        liveWindows: [],
+        usage: {},
+        thisWindowKey: 'main',
+    });
+    assert.equal(v[0].icon, 'heart');
+    assert.equal(v[1].icon, undefined);
+});

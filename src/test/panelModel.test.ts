@@ -80,15 +80,15 @@ test('actions depend on sign-in state and on main vs added', () => {
         view({ key: 'old', entry: { status: 'relogin_required' } }),
         view({ key: 'main', isMain: true, label: 'Claude 1' }),
     ], NOW);
-    assert.deepEqual(m.current!.actions, ['rename', 'remove']);
+    assert.deepEqual(m.current!.actions, ['icon', 'rename', 'remove']);
     assert.equal(m.current!.canRemove, true);
     const by = Object.fromEntries(m.others.map((a) => [a.key, a]));
-    assert.deepEqual(by.ok.actions, ['use', 'rename', 'remove']);
+    assert.deepEqual(by.ok.actions, ['use', 'icon', 'rename', 'remove']);
     assert.deepEqual(by.new.actions, ['signIn', 'remove']);
     assert.equal(by.new.name, 'Claude 4');
     assert.equal(by.new.state, 'notSignedIn');
     assert.equal(by.new.note, 'Not signed in yet');
-    assert.deepEqual(by.old.actions, ['signInAgain', 'rename', 'remove']);
+    assert.deepEqual(by.old.actions, ['signInAgain', 'icon', 'rename', 'remove']);
     assert.equal(by.old.state, 'relogin');
     assert.equal(by.old.note, 'Sign-in expired');
     assert.deepEqual(by.main.actions, ['use', 'rename', 'remove']);
@@ -104,4 +104,18 @@ test('plan is shown capitalised, problems get a readable note', () => {
     assert.equal(m.others[0].plan, 'Max');
     assert.equal(m.others[1].state, 'problem');
     assert.equal(m.others[1].note, 'Usage unavailable right now');
+});
+
+test("an added account shows its chosen icon; the main account never does; unknown icons show nothing", () => {
+    const m = toPanelModel([
+        view({ key: 'a', isThisWindow: true, icon: 'rocket' }),
+        view({ key: 'b', icon: 'no-such-icon' }),
+        view({ key: 'main', isMain: true, label: 'Claude 1', icon: 'star' }),
+    ], NOW);
+    assert.equal(m.current!.icon?.label, 'Rocket');
+    assert.match(m.current!.icon!.svg, /^<svg /);
+    const by = Object.fromEntries(m.others.map((a) => [a.key, a]));
+    assert.equal(by.b.icon, undefined);
+    assert.equal(by.main.icon, undefined);
+    assert.ok(!by.main.actions.includes('icon'));
 });

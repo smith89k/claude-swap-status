@@ -19,3 +19,12 @@ test('the main account wears the crown in the status bar', () => {
     bar.update([{ ...base, key: 'main', number: 1, label: 'personal', isMain: true, signedIn: false }]);
     assert.equal(item.text, '👑 personal | not signed in');
 });
+
+test('an added account wears its chosen icon in the status bar', () => {
+    const bar = new StatusBar();
+    const item = statusItems[statusItems.length - 1];
+    bar.update([{ ...base, icon: 'rocket', signedIn: false }]);
+    assert.equal(item.text, '$(rocket) work | not signed in');
+    bar.update([{ ...base, icon: 'gone', signedIn: false }]);
+    assert.equal(item.text, '$(account) work | not signed in');
+});

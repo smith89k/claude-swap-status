@@ -1,5 +1,6 @@
 // Turns the registry, open windows and usage cache into the list the UI shows.
 // Accounts start as "Claude <number>" (the main account is Claude 1); a rename replaces the whole name.
+import { accountIcon } from './accountIcons';
 import { effectiveNumbers } from './registry';
 import { MAIN_KEY, type Account, type AccountView, type Identity, type UsageEntry, type WindowBeat } from './types';
 
@@ -36,6 +37,9 @@ export function buildSnapshot(i: {
         }
         if (a.orgName) {
             v.orgName = a.orgName;
+        }
+        if (accountIcon(a.icon)) {
+            v.icon = a.icon;
         }
         if (i.usage[a.id]) {
             v.entry = i.usage[a.id];

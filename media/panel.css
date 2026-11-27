@@ -99,6 +99,17 @@ body.vscode-high-contrast .account.is-current {
     color: var(--vscode-charts-yellow, #cca700);
 }
 .acc-crown svg { width: 15px; height: 15px; }
+/* An added account's own icon: same size as the crown, in the text colour so the crown stays special. */
+.acc-icon {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    color: var(--vscode-foreground);
+}
+.acc-icon svg { width: 14px; height: 14px; }
+.session-account .acc-icon { color: var(--muted); }
 
 .acc-plan {
     flex: none;
@@ -325,6 +336,14 @@ button:focus-visible {
     border-bottom-color: var(--accent);
     font-weight: 600;
 }
+.tab-list { display: flex; gap: 2px; min-width: 0; }
+/* Reload window: at the right end of the tab row, always visible. */
+.tab-reload {
+    align-self: center;
+    margin-left: auto;
+    margin-bottom: 2px;
+}
+
 .tab-count {
     min-width: 16px;
     padding: 0 5px;
@@ -337,6 +356,31 @@ button:focus-visible {
 }
 
 /* ----- Sessions tab ----- */
+/* All | Active switch */
+.view-switch {
+    display: inline-flex;
+    margin: 10px 14px 0;
+    border: 1px solid var(--box);
+    border-radius: 4px;
+    overflow: hidden;
+}
+body.vscode-high-contrast .view-switch { border-color: var(--vscode-contrastBorder); }
+.view-btn {
+    padding: 3px 12px;
+    border: 0;
+    font: inherit;
+    font-size: 12px;
+    color: var(--muted);
+    background: transparent;
+    cursor: pointer;
+}
+.view-btn + .view-btn { border-left: 1px solid var(--box); }
+.view-btn:hover { color: var(--vscode-foreground); }
+.view-btn[aria-pressed="true"] {
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-button-background);
+}
+
 .sessions {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -375,6 +419,12 @@ body.vscode-high-contrast .session { border-color: var(--vscode-contrastBorder);
     height: 8px;
     border-radius: 50%;
     background: var(--muted);
+}
+/* Finished: a hollow grey dot. */
+.session[data-status="finished"] .session-dot {
+    box-sizing: border-box;
+    background: transparent;
+    border: 1.5px solid var(--muted);
 }
 .session[data-status="waiting"] .session-dot { background: var(--fill-warning); }
 .session[data-status="working"] .session-dot { background: var(--fill-normal); }

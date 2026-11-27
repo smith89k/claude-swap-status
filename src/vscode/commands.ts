@@ -1,6 +1,7 @@
 // Every command: switching, adding, renaming and removing accounts.
 import * as vscode from 'vscode';
 import { mkdir } from 'node:fs/promises';
+import { ACCOUNT_ICONS, iconPrefix } from '../core/accountIcons';
 import { formatWindow, pickUsage, statusLabel } from '../core/format';
 import { accountFolder, configHome, globalConfigPath, newAccountId } from '../core/paths';
 import { MAIN_REMOVE_NOTE } from '../core/panelModel';
@@ -40,7 +41,7 @@ export function registerCommands(context: vscode.ExtensionContext, c: AccountsCo
 
     const pickAccount = async (placeHolder: string, filter: (v: AccountView) => boolean = () => true): Promise<AccountView | undefined> => {
         const items = c.views.filter(filter).map((v) => ({
-            label: `${v.isThisWindow ? '$(check) ' : ''}${v.isMain ? '👑 ' : ''}${v.label}`,
+            label: `${v.isThisWindow ? '$(check) ' : ''}${iconPrefix(v.isMain, v.icon)}${v.label}`,
             description: v.email && v.email !== v.label ? v.email : undefined,
             detail: usageSummary(v),
             view: v,
@@ -74,10 +75,16 @@ export function registerCommands(context: vscode.ExtensionContext, c: AccountsCo
         await vscode.commands.executeCommand('workbench.action.reloadWindow');
     };
 
+    reg('claudeSwap.reloadWindow', async () => {
+        if (await confirmReload('Reload this window? Anything Claude is doing in this window will stop.')) {
+            await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        }
+    });
+
     reg('claudeSwap.switchAccount', async () => {
         type Item = vscode.QuickPickItem & { run: () => unknown };
         const items: Item[] = c.views.map((v) => ({
-            label: `${v.isThisWindow ? '$(check) ' : ''}${v.isMain ? '👑 ' : ''}${v.label}`,
+            label: `${v.isThisWindow ? '$(check) ' : ''}${iconPrefix(v.isMain, v.icon)}${v.label}`,
             description: v.email && v.email !== v.label ? v.email : undefined,
             detail: [usageSummary(v), v.usedBy.length ? `open in ${v.usedBy.join(', ')}` : ''].filter(Boolean).join('   ·   '),
             run: () => switchTo(v.key, v.label),
@@ -141,6 +148,30 @@ export function registerCommands(context: vscode.ExtensionContext, c: AccountsCo
         } else {
             await c.registry.update(v.key, { alias: value.trim() });
         }
+        await c.refresh(true);
+    });
+
+    reg('claudeSwap.changeAccountIcon', async (arg?: AccountArg) => {
+        const v = viewFor(arg) ?? (await pickAccount('Pick an account to change its icon', (x) => !x.isMain));
+        if (!v) {
+            return;
+        }
+        if (v.isMain) {
+            void vscode.window.showInformationMessage('The main account always wears the crown.');
+            return;
+        }
+        type Item = vscode.QuickPickItem & { icon: string };
+        const items: Item[] = ACCOUNT_ICONS.map((i) => ({
+            label: `$(${i.codicon}) ${i.label}`,
+            description: i.id === v.icon ? 'current' : undefined,
+            icon: i.id,
+        }));
+        items.push({ label: '$(circle-slash) No icon', description: v.icon ? undefined : 'current', icon: '' });
+        const pick = await vscode.window.showQuickPick(items, { placeHolder: `Pick an icon for "${v.label}"` });
+        if (!pick) {
+            return;
+        }
+        await c.registry.update(v.key, { icon: pick.icon });
         await c.refresh(true);
     });
 

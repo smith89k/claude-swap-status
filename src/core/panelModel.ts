@@ -1,5 +1,6 @@
 // What the side panel shows, worked out from the account snapshot. The panel's
 // script only draws this; every decision about text and actions is made here.
+import { accountIcon } from './accountIcons';
 import { formatAge, formatResetIn, pickUsage, usageLevel, type UsageLevel } from './format';
 import type { AccountView, UsageWindow } from './types';
 
@@ -21,7 +22,7 @@ export interface PanelMeter {
     title: string;
 }
 
-export type PanelAction = 'use' | 'signIn' | 'signInAgain' | 'rename' | 'remove';
+export type PanelAction = 'use' | 'signIn' | 'signInAgain' | 'icon' | 'rename' | 'remove';
 export type PanelState = 'ok' | 'stale' | 'checking' | 'notSignedIn' | 'relogin' | 'problem';
 
 export interface PanelAccount {
@@ -31,6 +32,8 @@ export interface PanelAccount {
     plan?: string;
     detail: string;
     isMain: boolean;
+    /** The drawing and name of an added account's icon, when it has one. */
+    icon?: { svg: string; label: string };
     isThisWindow: boolean;
     state: PanelState;
     note?: string;
@@ -118,6 +121,9 @@ function toAccount(v: AccountView, now: number): PanelAccount {
     } else if (!v.isThisWindow) {
         actions.push('use');
     }
+    if (v.signedIn && !v.isMain) {
+        actions.push('icon');
+    }
     if (v.signedIn || v.isMain) {
         actions.push('rename');
     }
@@ -136,6 +142,10 @@ function toAccount(v: AccountView, now: number): PanelAccount {
     };
     if (v.isMain) {
         a.removeNote = MAIN_REMOVE_NOTE;
+    }
+    const icon = v.isMain ? undefined : accountIcon(v.icon);
+    if (icon) {
+        a.icon = { svg: icon.svg, label: icon.label };
     }
     if (v.email) {
         a.email = v.email;

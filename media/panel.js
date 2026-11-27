@@ -14,7 +14,10 @@
         rename: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm3.83-2.06L4.47 9.76l8-8 1.77 1.77-8 8z"/></svg>',
         remove: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10 3h3v1h-1v9l-1 1H5l-1-1V4H3V3h3V2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1zM9 2H7v1h2V2zM5 4v9h6V4H5zm1 2h1v5H6V6zm3 0h1v5H9V6z"/></svg>',
     };
-    const TOOL_LABEL = { rename: 'Rename', remove: 'Delete' };
+    ICONS.icon = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.2l2.1 4.3 4.7.7-3.4 3.3.8 4.7L8 12l-4.2 2.2.8-4.7-3.4-3.3 4.7-.7zm0 2.3L6.6 6.3l-3.1.5 2.3 2.2-.6 3.1L8 10.6l2.8 1.5-.6-3.1 2.3-2.2-3.1-.5z"/></svg>';
+    const TOOL_LABEL = { icon: 'Change icon', rename: 'Rename', remove: 'Delete' };
+    // A window with a round arrow inside: "reload this window" (the title bar's refresh only updates the numbers).
+    const RELOAD_WINDOW = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1.6" y="2.1" width="12.8" height="11.8" rx="1.8"/><path d="M1.6 5.1h12.8"/><path d="M10.6 9.6a2.6 2.6 0 1 1-.76-1.84"/><path d="M10.2 6.4v1.6H8.6"/></svg>';
     const CROWN = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.3 4.2 4.9 7 8 2.2 11.1 7l3.6-2.8-1.3 7.3H2.6L1.3 4.2zM2.7 12.6h10.6V14H2.7z"/></svg>';
 
     function el(tag, className, text) {
@@ -60,6 +63,15 @@
         return row;
     }
 
+    function iconBadge(svg, label) {
+        const badge = el('span', 'acc-icon');
+        badge.innerHTML = svg;
+        badge.setAttribute('role', 'img');
+        badge.setAttribute('aria-label', label);
+        badge.title = label;
+        return badge;
+    }
+
     function accountBlock(a) {
         const block = el('article', 'account' + (a.isThisWindow ? ' is-current' : ''));
         block.dataset.state = a.state;
@@ -76,6 +88,8 @@
             crown.setAttribute('role', 'img');
             crown.setAttribute('aria-label', 'Main account');
             head.append(crown);
+        } else if (a.icon) {
+            head.append(iconBadge(a.icon.svg, a.icon.label));
         }
         head.append(el('span', 'acc-name', a.name));
         if (a.plan) {
@@ -85,7 +99,7 @@
         // next line as one group, still aligned to the right.
         const end = el('div', 'acc-end');
         const tools = el('div', 'acc-tools');
-        for (const action of ['rename', 'remove']) {
+        for (const action of ['icon', 'rename', 'remove']) {
             if (!a.actions.includes(action)) {
                 continue;
             }
@@ -153,7 +167,7 @@
         const b = el('button', 'session' + (r.canJump ? '' : ' cannot-jump'));
         b.type = 'button';
         b.dataset.status = r.status;
-        b.title = r.canJump ? 'Jump to this session' : (r.note || '');
+        b.title = r.canJump ? (r.status === 'finished' ? 'Reopen this conversation here' : 'Jump to this session') : (r.note || '');
         const top = el('span', 'session-top');
         top.append(el('span', 'session-dot'), el('span', 'session-title', r.title));
         const account = el('span', 'session-account');
@@ -163,6 +177,10 @@
             crown.setAttribute('role', 'img');
             crown.setAttribute('aria-label', 'Main account');
             account.append(crown);
+        } else if (r.accountIcon) {
+            const badge = iconBadge(r.accountIcon, 'Account icon');
+            badge.removeAttribute('title');
+            account.append(badge);
         }
         account.append(el('span', 'session-account-name', r.accountName));
         top.append(account);
@@ -175,12 +193,27 @@
         return b;
     }
 
-    function renderSessions(sessions) {
-        if (!sessions || !sessions.count) {
-            app.append(el('p', 'intro', 'No Claude sessions are running right now.'));
-            return;
+    function viewSwitch() {
+        const bar = el('div', 'view-switch');
+        bar.setAttribute('role', 'group');
+        bar.setAttribute('aria-label', 'Which sessions to show');
+        for (const v of [{ id: 'all', text: 'All', title: 'Running sessions, then finished ones from the last 30 days' }, { id: 'active', text: 'Active', title: 'Only running sessions' }]) {
+            const b = el('button', 'view-btn', v.text);
+            b.type = 'button';
+            b.title = v.title;
+            b.setAttribute('aria-pressed', String(state.view === v.id));
+            b.addEventListener('click', () => {
+                state = { ...state, view: v.id };
+                vscode.setState(state);
+                draw();
+            });
+            bar.append(b);
         }
-        for (const g of sessions.groups) {
+        return bar;
+    }
+
+    function renderGroups(groups) {
+        for (const g of groups) {
             const section = el('section', 'sessions');
             section.append(el('h2', '', g.heading));
             g.rows.forEach((r) => section.append(sessionRow(r)));
@@ -188,12 +221,25 @@
         }
     }
 
+    function renderSessions(sessions) {
+        app.append(viewSwitch());
+        const running = sessions ? sessions.groups : [];
+        const past = state.view === 'all' && sessions && sessions.past ? sessions.past : [];
+        if (!running.length && !past.length) {
+            app.append(el('p', 'intro', state.view === 'all' ? 'No Claude sessions in the last 30 days.' : 'No Claude sessions are running right now.'));
+            return;
+        }
+        renderGroups(running);
+        renderGroups(past);
+    }
+
     // ----- Tabs -----
 
-    let state = { model: undefined, sessions: undefined, tab: 'accounts' };
+    let state = { model: undefined, sessions: undefined, tab: 'accounts', view: 'active' };
 
     function tabBar() {
-        const bar = el('div', 'tabs');
+        const row = el('div', 'tabs');
+        const bar = el('div', 'tab-list');
         bar.setAttribute('role', 'tablist');
         const tabs = [
             { id: 'accounts', text: 'Accounts' },
@@ -225,7 +271,19 @@
             }
         });
         bar.append(...buttons);
-        return bar;
+        row.append(bar, reloadButton());
+        return row;
+    }
+
+    // Reloads this editor window, the same way switching accounts does (it asks first).
+    function reloadButton() {
+        const b = el('button', 'icon-btn tab-reload');
+        b.type = 'button';
+        b.innerHTML = RELOAD_WINDOW;
+        b.title = 'Reload window';
+        b.setAttribute('aria-label', 'Reload window');
+        b.addEventListener('click', () => send('reload'));
+        return b;
     }
 
     function select(tab) {
@@ -278,7 +336,12 @@
 
     const saved = vscode.getState();
     if (saved && saved.model) {
-        state = { model: saved.model, sessions: saved.sessions, tab: saved.tab === 'sessions' ? 'sessions' : 'accounts' };
+        state = { ...state, model: saved.model, sessions: saved.sessions, tab: saved.tab === 'sessions' ? 'sessions' : 'accounts' };
+    }
+    if (saved && saved.view === 'all') {
+        state = { ...state, view: 'all' };
+    }
+    if (state.model) {
         draw();
     }
     vscode.postMessage({ type: 'ready' });

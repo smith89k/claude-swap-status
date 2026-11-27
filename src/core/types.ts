@@ -54,6 +54,8 @@ export interface Account {
     alias?: string;
     /** Shown as "Claude <number>". Claude 1 is the main login, so added accounts start at 2. */
     number?: number;
+    /** The id of the icon this account wears (see accountIcons.ts). */
+    icon?: string;
     createdAt: string;
 }
 
@@ -83,6 +85,8 @@ export interface AccountView {
     email?: string;
     orgName?: string;
     isMain: boolean;
+    /** The icon this added account wears, when it has a known one. The main account always wears the crown. */
+    icon?: string;
     isThisWindow: boolean;
     signedIn: boolean;
     usedBy: string[];

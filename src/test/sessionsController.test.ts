@@ -91,3 +91,51 @@ test('an unknown session is reported as missing', async () => {
     const { c } = await controller([], [W('me', ['C:\\p\\a'])]);
     assert.equal(await c.jump('nope'), 'missing');
 });
+
+async function pastController(files: Record<string, string[]>, accounts: any[]) {
+    fake.reset();
+    const root = await mkdtemp(join(tmpdir(), 'cs-sc-'));
+    const home = join(root, 'main');
+    for (const [rel, lines] of Object.entries(files)) {
+        await mkdir(join(home, 'projects', rel, '..'), { recursive: true });
+        await writeFile(join(home, 'projects', rel), lines.join('\n'));
+    }
+    return new SessionsController({
+        root,
+        thisWindowId: 'me',
+        sources: async () => [{ accountKey: 'main', configHome: home }],
+        liveWindows: async () => [W('me', ['C:\p\a'])],
+        accounts: () => accounts,
+        log: { warn: () => undefined },
+        platform: 'win32',
+        isAlive: () => true,
+    });
+}
+
+test('a finished session from this folder and account reopens in a Claude tab here', async () => {
+    const c = await pastController({ 'C--p-a/old1.jsonl': [JSON.stringify({ cwd: 'C:\p\a', entrypoint: 'claude-vscode' })] }, [{ key: 'main', label: 'personal', isMain: true, isThisWindow: true }]);
+    await c.refresh();
+    assert.equal(c.model.past[0]?.rows[0]?.sessionId, 'old1');
+    assert.equal(await c.jump('old1'), 'opened');
+    assert.deepEqual(fake.commands.find((x) => x.id === 'claude-vscode.editor.open')?.args, ['old1']);
+});
+
+test('a finished session from another account only shows its note', async () => {
+    const c = await pastController({ 'C--p-a/old2.jsonl': [JSON.stringify({ cwd: 'C:\p\a', entrypoint: 'claude-vscode' })] }, [{ key: 'main', label: 'personal', isMain: true, isThisWindow: false }, { key: 'a1', label: 'work', isThisWindow: true }]);
+    await c.refresh();
+    assert.equal(await c.jump('old2'), 'noted');
+    assert.ok(fake.messages.some((m) => m.text === 'This conversation belongs to personal. Switch this window to personal to reopen it.'));
+    assert.ok(!fake.commands.some((x) => x.id === 'claude-vscode.editor.open'));
+});
+
+test('a forced refresh reads finished sessions again right away; a normal one waits 30 seconds', async () => {
+    const c = await pastController({ 'C--p-a/one.jsonl': [JSON.stringify({ cwd: 'C:\p\a' })] }, [{ key: 'main', label: 'personal', isMain: true, isThisWindow: true }]);
+    await c.refresh();
+    const home = (c as any).d.sources;
+    const [{ configHome }] = await home();
+    await writeFile(join(configHome, 'projects', 'C--p-a', 'two.jsonl'), JSON.stringify({ cwd: 'C:\p\a' }));
+    await c.refresh();
+    assert.deepEqual(c.model.past.flatMap((g) => g.rows).map((r) => r.sessionId), ['one']);
+    await c.refresh(true);
+    assert.deepEqual(c.model.past.flatMap((g) => g.rows).map((r) => r.sessionId).sort(), ['one', 'two']);
+});

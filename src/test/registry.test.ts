@@ -83,3 +83,12 @@ test('the main login (Claude 1) can have a name too', async () => {
     await reg.setMainAlias('');
     assert.equal(await reg.getMainAlias(), undefined);
 });
+
+test('an icon is saved with the account and cleared with an empty value', async () => {
+    const reg = new Registry(await tmp());
+    await reg.add({ id: 'ab12cd34', folder: '/x' });
+    await reg.update('ab12cd34', { icon: 'rocket' });
+    assert.equal((await reg.get('ab12cd34'))?.icon, 'rocket');
+    await reg.update('ab12cd34', { icon: '' });
+    assert.equal((await reg.get('ab12cd34'))?.icon, undefined);
+});

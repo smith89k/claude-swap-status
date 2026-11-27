@@ -9,10 +9,12 @@ const ACTION_COMMANDS: Record<string, string> = {
     use: 'claudeSwap.useInThisWindow',
     signIn: 'claudeSwap.signInAgain',
     signInAgain: 'claudeSwap.signInAgain',
+    icon: 'claudeSwap.changeAccountIcon',
     rename: 'claudeSwap.renameAccount',
     remove: 'claudeSwap.removeAccount',
     add: 'claudeSwap.addAccount',
     refresh: 'claudeSwap.refreshStatus',
+    reload: 'claudeSwap.reloadWindow',
 };
 
 export class AccountsPanelProvider implements vscode.WebviewViewProvider, vscode.Disposable {

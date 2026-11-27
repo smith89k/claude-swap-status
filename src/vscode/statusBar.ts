@@ -1,11 +1,16 @@
 // The status bar item: this window's account and its usage.
 import * as vscode from 'vscode';
 import { formatAge, formatResetDetail, formatWindow, needsAttention, pickUsage, statusLabel, usageLevel } from '../core/format';
+import { accountIcon } from '../core/accountIcons';
 import type { AccountView } from '../core/types';
 
-/** The main account wears a crown; every other account gets the usual person icon. */
+/** The main account wears a crown; other accounts wear their chosen icon, or the usual person icon. */
 function icon(view: AccountView): string {
-    return view.isMain ? '👑' : '$(account)';
+    if (view.isMain) {
+        return '👑';
+    }
+    const chosen = accountIcon(view.icon);
+    return chosen ? `$(${chosen.codicon})` : '$(account)';
 }
 
 export class StatusBar implements vscode.Disposable {

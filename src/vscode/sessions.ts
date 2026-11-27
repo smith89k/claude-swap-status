@@ -1,17 +1,20 @@
-// The Sessions tab's engine: keeps the list of running Claude sessions fresh while
-// the panel is visible, and jumps to a session, in this window or another one.
+// The Sessions tab's engine: keeps the list of running (and recently finished) Claude
+// sessions fresh while the panel is visible, and jumps to a session, in this window or
+// another one, or reopens a finished one here.
 import * as vscode from 'vscode';
 import { watch, type FSWatcher } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import * as path from 'node:path';
 import { takeJumpRequest, writeJumpRequest } from '../core/jumpRequests';
 import { ancestors, type ProcRunner } from '../core/processTree';
+import { PastSessionReader, type PastSession } from '../core/pastSessions';
 import { listSessions, type RunningSession, type SessionSource } from '../core/sessions';
-import { locate, toSessionsModel, type SessionsModel } from '../core/sessionsModel';
+import { locate, toPastGroups, toSessionsModel, type SessionsModel } from '../core/sessionsModel';
 import type { AccountView, WindowBeat } from '../core/types';
 import { isPidAlive } from '../core/windows';
 
 const VISIBLE_POLL_MS = 3_000;
+const PAST_POLL_MS = 30_000;
 const REQUEST_POLL_MS = 2_000;
 const TERMINAL_LEVELS = 3;
 
@@ -28,13 +31,16 @@ export interface SessionsDeps {
     now?: () => number;
     run?: ProcRunner;
     isAlive?: (pid: number) => boolean;
+    /** The folders open in this window. Defaults to the ones in this window's heartbeat. */
+    thisFolders?: () => string[];
 }
 
 export class SessionsController implements vscode.Disposable {
     private readonly emitter = new vscode.EventEmitter<SessionsModel>();
     readonly onDidChange = this.emitter.event;
-    model: SessionsModel = { count: 0, groups: [] };
+    model: SessionsModel = { count: 0, groups: [], past: [] };
     sessions: RunningSession[] = [];
+    past: PastSession[] = [];
 
     private readonly platform: NodeJS.Platform;
     private readonly now: () => number;
@@ -42,17 +48,49 @@ export class SessionsController implements vscode.Disposable {
     private requestTimer: NodeJS.Timeout | undefined;
     private watcher: FSWatcher | undefined;
     private windows: WindowBeat[] = [];
+    private readonly pastReader = new PastSessionReader();
+    private pastAt: number | undefined;
 
     constructor(private readonly d: SessionsDeps) {
         this.platform = d.platform ?? process.platform;
         this.now = d.now ?? Date.now;
     }
 
-    async refresh(): Promise<void> {
-        this.sessions = await listSessions(await this.d.sources(), this.d.isAlive ?? isPidAlive);
+    /** Re-reads running sessions; finished ones too when 30 seconds have passed, or right away with `forcePast`. */
+    async refresh(forcePast = false): Promise<void> {
+        if (forcePast) {
+            this.pastAt = undefined;
+        }
+        const sources = await this.d.sources();
+        this.sessions = await listSessions(sources, this.d.isAlive ?? isPidAlive);
         this.windows = [...(await this.d.liveWindows())]; // a snapshot of what the list was drawn from
-        this.model = toSessionsModel(this.sessions, this.windows, this.d.accounts(), this.d.thisWindowId, this.now(), this.platform);
+        const now = this.now();
+        // Finished sessions change slowly and take longer to read: at most every 30 seconds.
+        if (this.pastAt === undefined || now - this.pastAt >= PAST_POLL_MS) {
+            this.pastAt = now;
+            try {
+                this.past = await this.pastReader.list(sources, now);
+            } catch (e: any) {
+                this.d.log.warn(`past sessions: ${e?.code ?? e?.name ?? 'error'}`);
+            }
+        }
+        const accounts = this.d.accounts();
+        this.model = {
+            ...toSessionsModel(this.sessions, this.windows, accounts, this.d.thisWindowId, now, this.platform),
+            past: toPastGroups(this.past, {
+                runningIds: new Set(this.sessions.map((x) => x.sessionId)),
+                accounts,
+                thisAccountKey: accounts.find((v) => v.isThisWindow)?.key,
+                thisFolders: this.thisFolders(),
+                now,
+                platform: this.platform,
+            }),
+        };
         this.emitter.fire(this.model);
+    }
+
+    private thisFolders(): string[] {
+        return this.d.thisFolders?.() ?? this.windows.find((w) => w.windowId === this.d.thisWindowId)?.folders ?? [];
     }
 
     /** Re-read every 3 seconds while the panel is visible; stop while it is hidden. */
@@ -76,7 +114,7 @@ export class SessionsController implements vscode.Disposable {
             s = this.sessions.find((x) => x.sessionId === sessionId);
         }
         if (!s) {
-            return 'missing';
+            return this.reopen(sessionId);
         }
         // Place the session using the windows the list was drawn from, then ask again at
         // click time whether the target window is still open: it may have just closed.
@@ -102,6 +140,26 @@ export class SessionsController implements vscode.Disposable {
             void vscode.window.showInformationMessage(row.note);
         }
         return 'noted';
+    }
+
+    /** A finished session: reopen it in a Claude tab here, or say why it can't be. */
+    private async reopen(sessionId: string): Promise<JumpResult> {
+        const row = this.model.past.flatMap((g) => g.rows).find((r) => r.sessionId === sessionId);
+        if (!row) {
+            return 'missing';
+        }
+        if (!row.canJump) {
+            if (row.note) {
+                void vscode.window.showInformationMessage(row.note);
+            }
+            return 'noted';
+        }
+        try {
+            await vscode.commands.executeCommand('claude-vscode.editor.open', sessionId);
+        } catch {
+            void vscode.window.showWarningMessage("Couldn't reopen that Claude conversation here.");
+        }
+        return 'opened';
     }
 
     /** Picks up a request another window left for this one, and acts on it. */

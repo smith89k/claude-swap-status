@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { samePath, isUnder, locate, toSessionsModel } from '../core/sessionsModel';
+import { samePath, isUnder, locate, toSessionsModel, toPastGroups, NOTE_PAST_APP, type PastContext } from '../core/sessionsModel';
+import type { PastSession } from '../core/pastSessions';
 import type { RunningSession } from '../core/sessions';
 import type { WindowBeat } from '../core/types';
 
@@ -69,5 +70,58 @@ test('a window with no safe thing to open (unsaved multi-folder workspace) is ne
 });
 
 test('nothing running gives an empty model', () => {
-    assert.deepEqual(toSessionsModel([], [], [], 'me', 0), { count: 0, groups: [] });
+    assert.deepEqual(toSessionsModel([], [], [], 'me', 0), { count: 0, groups: [], past: [] });
+});
+
+const P = (p: Partial<PastSession>): PastSession => ({ sessionId: 'p', cwd: 'C:\\p\\a', title: 'Fix login', kind: 'ide', lastActive: 0, accountKey: 'main', ...p });
+const views = [{ key: 'main', number: 1, label: 'personal', isMain: true } as any, { key: 'a1', number: 2, label: 'work', isMain: false } as any];
+
+function ctx(now: number, extra: Partial<PastContext> = {}): PastContext {
+    return { runningIds: new Set(), accounts: views, thisAccountKey: 'main', thisFolders: ['C:\\p\\a'], now, platform: 'win32', ...extra };
+}
+
+test('finished sessions are grouped by day, newest first, and running ones are left out', () => {
+    const now = new Date(2026, 10, 27, 15, 0).getTime();
+    const at = (d: number, h: number) => new Date(2026, 10, 27 - d, h, 0).getTime();
+    const groups = toPastGroups([
+        P({ sessionId: 'today-early', lastActive: at(0, 1) }),
+        P({ sessionId: 'today-late', lastActive: at(0, 14) }),
+        P({ sessionId: 'yesterday', lastActive: at(1, 23) }),
+        P({ sessionId: 'week', lastActive: at(6, 9) }),
+        P({ sessionId: 'older', lastActive: at(7, 23) }),
+        P({ sessionId: 'running', lastActive: at(0, 14) }),
+    ], ctx(now, { runningIds: new Set(['running']) }));
+    assert.deepEqual(groups.map((g) => [g.heading, g.rows.map((r) => r.sessionId)]), [
+        ['Today', ['today-late', 'today-early']],
+        ['Yesterday', ['yesterday']],
+        ['Earlier this week', ['week']],
+        ['Older', ['older']],
+    ]);
+    const r = groups[0].rows[0];
+    assert.deepEqual([r.status, r.title, r.subtitle, r.whereText, r.ageText, r.accountName, r.isMain, r.canJump, r.note], ['finished', 'Fix login', 'a', 'Claude tab', '1h ago', 'personal', true, true, undefined]);
+});
+
+test("a finished session can only reopen here with this window's account and folder", () => {
+    const groups = toPastGroups([
+        P({ sessionId: 'app', kind: 'app', lastActive: 4 }),
+        P({ sessionId: 'acc', accountKey: 'a1', lastActive: 3 }),
+        P({ sessionId: 'sub', cwd: 'C:\\p\\a\\src', kind: 'terminal', lastActive: 2 }),
+        P({ sessionId: 'ok', cwd: 'c:/P/A/', title: 'A', lastActive: 1 }),
+    ], ctx(10));
+    const by = Object.fromEntries(groups.flatMap((g) => g.rows).map((r) => [r.sessionId, r]));
+    assert.equal(by.app.note, NOTE_PAST_APP);
+    assert.equal(by.acc.note, 'This conversation belongs to work. Switch this window to work to reopen it.');
+    assert.equal(by.sub.note, 'This conversation is from the src folder. Open that folder to reopen it.');
+    assert.deepEqual([by.ok.canJump, by.ok.note, by.ok.subtitle], [true, undefined, '']);
+    assert.ok([by.app, by.acc, by.sub].every((r) => !r.canJump));
+});
+
+test('session rows carry an added account\'s icon, never the main account\'s', () => {
+    const accounts = [{ key: 'main', label: 'personal', isMain: true, icon: 'star' } as any, { key: 'a1', label: 'work', isMain: false, icon: 'gem' } as any];
+    const m = toSessionsModel([S({ sessionId: 'x1', accountKey: 'a1' }), S({ sessionId: 'x2', accountKey: 'main' })], [], accounts, 'me', 0, 'win32');
+    const by = Object.fromEntries(m.groups.flatMap((g) => g.rows).map((r) => [r.sessionId, r]));
+    assert.match(by.x1.accountIcon ?? '', /^<svg /);
+    assert.equal(by.x2.accountIcon, undefined);
+    const past = toPastGroups([P({ sessionId: 'p1', accountKey: 'a1' })], ctx(10, { accounts }));
+    assert.match(past[0].rows[0].accountIcon ?? '', /^<svg /);
 });
