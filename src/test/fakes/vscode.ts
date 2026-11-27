@@ -6,12 +6,17 @@ export const fake = {
     config: {} as Record<string, unknown>,
     activeExtensions: new Set<string>(),
     reply: undefined as string | undefined,
+    /** Lets a test play another extension's command (it runs after the call is recorded). */
+    onCommand: undefined as ((id: string, args: unknown[]) => void | Promise<void>) | undefined,
     reset() {
         this.messages.length = 0;
         this.commands.length = 0;
         this.config = {};
         this.activeExtensions.clear();
         this.reply = undefined;
+        this.onCommand = undefined;
+        tabState.groups.length = 0;
+        tabState.closed.length = 0;
     },
 };
 
@@ -30,9 +35,73 @@ export const window = {
 };
 
 export const commands = {
-    executeCommand: (id: string, ...args: unknown[]) => {
+    executeCommand: async (id: string, ...args: unknown[]) => {
         fake.commands.push({ id, args });
-        return Promise.resolve(undefined);
+        await fake.onCommand?.(id, args);
+        return undefined;
+    },
+};
+
+/** Editor tabs. A webview tab (like a Claude tab) has a TabInputWebview with the webview's type. */
+export class TabInputWebview {
+    constructor(readonly viewType: string) {}
+}
+
+export interface FakeTab { label: string; input: unknown; isActive: boolean }
+export interface FakeGroup { viewColumn: number; tabs: FakeTab[]; isActive: boolean; readonly activeTab: FakeTab | undefined }
+export const tabState = { groups: [] as FakeGroup[], closed: [] as string[] };
+
+export const CLAUDE_VIEW_TYPE = 'mainThreadWebview-claudeVSCodePanel';
+
+/** Lays out tab groups. `active` marks the selected tab of a group; the first group is the active one unless one says so. */
+export function setTabs(groups: { tabs: { label: string; claude?: boolean; active?: boolean }[]; active?: boolean }[]): void {
+    tabState.groups.length = 0;
+    groups.forEach((g, i) => {
+        const tabs: FakeTab[] = g.tabs.map((t) => ({ label: t.label, input: t.claude ? new TabInputWebview(CLAUDE_VIEW_TYPE) : { uri: t.label }, isActive: !!t.active }));
+        tabState.groups.push({ viewColumn: i + 1, tabs, isActive: g.active ?? i === 0, get activeTab(): FakeTab | undefined { return tabs.find((t) => t.isActive); } });
+    });
+}
+
+/** Makes this tab the selected one in its group, and its group the active one. */
+export function activateTab(tab: FakeTab): void {
+    for (const g of tabState.groups) {
+        const mine = g.tabs.includes(tab);
+        g.isActive = mine;
+        if (mine) {
+            g.tabs.forEach((t) => (t.isActive = t === tab));
+        }
+    }
+}
+
+/** Adds a Claude tab to the active group and selects it. */
+export function addClaudeTab(label: string): FakeTab {
+    const g = tabState.groups.find((x) => x.isActive) ?? tabState.groups[0];
+    const tab: FakeTab = { label, input: new TabInputWebview(CLAUDE_VIEW_TYPE), isActive: false };
+    g.tabs.push(tab);
+    activateTab(tab);
+    return tab;
+}
+
+(window as any).tabGroups = {
+    get all() {
+        return tabState.groups;
+    },
+    get activeTabGroup() {
+        return tabState.groups.find((g) => g.isActive) ?? tabState.groups[0];
+    },
+    close: async (tab: FakeTab) => {
+        for (const g of tabState.groups) {
+            const i = g.tabs.indexOf(tab);
+            if (i >= 0) {
+                g.tabs.splice(i, 1);
+                tabState.closed.push(tab.label);
+                if (tab.isActive && g.tabs.length) {
+                    g.tabs[Math.max(0, i - 1)].isActive = true;
+                }
+                return true;
+            }
+        }
+        return false;
     },
 };
 

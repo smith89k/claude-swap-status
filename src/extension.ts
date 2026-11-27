@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { PastSessionReader } from './core/pastSessions';
 import { accountsRoot, configHome } from './core/paths';
 import { Registry } from './core/registry';
 import { MAIN_KEY, type AccountView } from './core/types';
@@ -6,6 +7,7 @@ import { AccountsPanelProvider } from './vscode/accountsPanel';
 import { registerCommands } from './vscode/commands';
 import { AccountsController } from './vscode/controller';
 import { StatusBar } from './vscode/statusBar';
+import { HandoffController } from './vscode/handoff';
 import { finishPendingRemoval } from './vscode/pendingRemoval';
 import { SessionsController } from './vscode/sessions';
 import { applyWindowAccount } from './vscode/windowAccount';
@@ -40,14 +42,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
     );
     registerCommands(context, c);
 
+    // Every Claude config folder on this PC: the main login's and each added account's.
+    const sources = async () => [
+        { accountKey: MAIN_KEY, configHome: configHome(ORIGINAL_CONFIG_DIR) },
+        ...(await registry.list()).map((a) => ({ accountKey: a.id, configHome: a.folder })),
+    ];
+
     // Sessions tab: every running Claude session on this PC, and jumping to it.
     const sessions = new SessionsController({
         root,
         thisWindowId: c.windowId,
-        sources: async () => [
-            { accountKey: MAIN_KEY, configHome: configHome(ORIGINAL_CONFIG_DIR) },
-            ...(await registry.list()).map((a) => ({ accountKey: a.id, configHome: a.folder })),
-        ],
+        sources,
         liveWindows: () => c.windows.live(),
         accounts: () => c.views,
         thisFolders: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
@@ -82,6 +87,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<Claude
         ]);
     }));
     sessions.startWatching();
+
+    // Claude Away's take over: close a conversation's Claude tab neatly, and reopen it on hand back.
+    const titlesReader = new PastSessionReader();
+    const handoff = new HandoffController({
+        root,
+        thisWindowId: c.windowId,
+        thisAccountKey: () => c.thisWindowKey,
+        sources,
+        liveWindows: () => c.windows.live(),
+        titles: async () => new Map((await titlesReader.list(await sources(), Date.now())).map((p) => [p.sessionId, p.title])),
+        log,
+    });
+    context.subscriptions.push(handoff);
+    handoff.start();
 
     const panel = new AccountsPanelProvider(context.extensionUri, c, sessions);
     context.subscriptions.push(panel, vscode.window.registerWebviewViewProvider(AccountsPanelProvider.viewType, panel));

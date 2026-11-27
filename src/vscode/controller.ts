@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { createCredentialStore, readIdentity, type CredentialStore } from '../core/credentials';
+import { HANDOFF_VERSION } from '../core/handoff';
 import { withCredentialLocks, withLock } from '../core/locks';
 import { fetchUsage, refreshAccessToken } from '../core/oauth';
 import { configHome, globalConfigPath } from '../core/paths';
@@ -102,6 +103,7 @@ export class AccountsController implements vscode.Disposable {
                 pid: process.pid,
                 folders,
                 ...(openTarget ? { openTarget } : {}),
+                handoff: HANDOFF_VERSION, // tells Claude Away this window can close and reopen Claude tabs
             });
         } catch (e: any) {
             this.log.warn(`heartbeat failed: ${e?.code ?? e?.name ?? 'error'}`);
