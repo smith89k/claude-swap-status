@@ -2,7 +2,7 @@
   "name": "claude-swap-status",
   "displayName": "Claude Swap Status",
   "description": "See your Claude Code usage in the status bar, and give each Antigravity IDE or VS Code window its own Claude account. Not affiliated with Anthropic.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "license": "MIT",
   "icon": "icon.png",
   "publisher": "smith89k",

@@ -98,7 +98,7 @@ A switch at the top of the Sessions tab picks what to show:
 Claude Away is a separate tray app that lets you answer Claude from your phone while you're away. When it takes a conversation over, and when it hands it back, this extension looks after the Claude tab in VS Code:
 
 - **Take over:** the conversation's Claude tab closes neatly, as if you closed it yourself, instead of showing "Claude Code process exited with code 1".
-- **Hand back** (you turn Away off): the conversation opens again in a fresh Claude tab, with everything you sent from the phone in it, ready to type in.
+- **Hand back** (you turn Away off): the conversation opens again in a fresh Claude tab, with everything you sent from the phone in it, ready to type in. A conversation that ran in a terminal starts again with `claude --resume` in that same terminal, or in a new terminal in its folder if that one was closed.
 - **It never closes a tab while Claude is working in it**, and it never opens a second copy of a conversation. If the conversation was already reopened, it leaves it alone.
 - **The window holding the conversation's folder does it**, for the account the conversation belongs to. If no window has that folder open when Claude Away hands it back, the conversation opens when you open that folder within 5 minutes.
 - If the conversation is in the Claude sidebar instead of a tab, take over works the old way.

@@ -1396,6 +1396,16 @@ function parseRequest(raw, platform = process.platform) {
       return void 0;
     }
     req.pid = r.pid;
+  } else {
+    if (r.kind !== void 0 && r.kind !== "ide" && r.kind !== "terminal") {
+      return void 0;
+    }
+    if (r.kind) {
+      req.kind = r.kind;
+    }
+    if (Array.isArray(r.shells)) {
+      req.shells = r.shells.filter((p) => isNum(p) && Number.isInteger(p) && p > 0);
+    }
   }
   return req;
 }
@@ -2424,16 +2434,21 @@ var HandoffController = class {
   /** Open the conversation again once Claude Away's copy has ended, replacing a dead tab if one is left. */
   async open(req) {
     let sessions = await this.running();
+    let free = false;
     for (let i = 0; i < FREE_WAIT_MS / FREE_POLL_MS; i++) {
       const holders = sessions.filter((x) => x.sessionId === req.sessionId);
       if (holders.some((x) => x.kind === "ide")) {
         return "already-open";
       }
       if (!holders.length) {
+        free = true;
         break;
       }
       await this.sleep(FREE_POLL_MS);
       sessions = await this.running();
+    }
+    if (req.kind === "terminal") {
+      return free ? this.openInTerminal(req) : "already-open";
     }
     const pick = await this.show(req.sessionId, sessions);
     if (pick.kind === "existing") {
@@ -2441,6 +2456,22 @@ var HandoffController = class {
       await this.sleep(SETTLE_MS);
       await vscode6.commands.executeCommand(OPEN, req.sessionId);
     }
+    return "opened";
+  }
+  /** Runs `claude --resume` in the terminal the conversation ran in, or in a new one in its folder. */
+  async openInTerminal(req) {
+    const shells = new Set(req.shells ?? []);
+    let terminal;
+    for (const t of vscode6.window.terminals) {
+      const pid = await t.processId;
+      if (pid !== void 0 && shells.has(pid)) {
+        terminal = t;
+        break;
+      }
+    }
+    terminal ??= vscode6.window.createTerminal({ name: "Claude", cwd: req.cwd });
+    terminal.show();
+    terminal.sendText(`claude --resume ${req.sessionId}`);
     return "opened";
   }
   /** Asks Claude to show the conversation, and works out which tab that brought forward. */
